@@ -117,6 +117,94 @@ async function getGameName(appId, env, ctx) {
 	}
 }
 
+// reads an image's own header for its real pixel dimensions, since Steam's preview_width/preview_height can be missing or stale
+async function probeImageDimensions(url) {
+	if (!url) return null;
+
+	try {
+		const response = await fetch(url, { headers: { Range: "bytes=0-131071" } });
+		if (!response.ok || !response.body) return null;
+
+		// stop at ~128KB even if the origin ignores Range and streams the whole image back
+		const CAP = 131072;
+		const reader = response.body.getReader();
+		const chunks = [];
+		let total = 0;
+
+		while (total < CAP) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+			total += value.length;
+		}
+		reader.cancel().catch(() => {});
+
+		const bytes = new Uint8Array(total);
+		let offset = 0;
+		for (const chunk of chunks) {
+			bytes.set(chunk, offset);
+			offset += chunk.length;
+		}
+
+		return parseImageDimensions(bytes);
+	} catch (error) {
+		console.error("Image dimension probe error:", error);
+		return null;
+	}
+}
+
+// supports PNG, GIF, WEBP, JPEG: the formats Steam's preview CDN actually serves
+function parseImageDimensions(bytes) {
+	if (bytes.length < 24) return null;
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+	// PNG: 8-byte signature, then an IHDR chunk with width/height as big-endian uint32s
+	if (view.getUint32(0) === 0x89504e47 && view.getUint32(4) === 0x0d0a1a0a) {
+		return { width: view.getUint32(16), height: view.getUint32(20) };
+	}
+
+	// GIF87a/89a: width/height are little-endian uint16s right after the 6-byte signature
+	if (view.getUint32(0) === 0x47494638 && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61) {
+		return { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+	}
+
+	// WEBP: RIFF/WEBP header, then a VP8/VP8L/VP8X chunk, each encoding dimensions differently
+	if (view.getUint32(0) === 0x52494646 && view.getUint32(8) === 0x57454250) {
+		const chunkType = view.getUint32(12);
+		if (chunkType === 0x56503820) { // "VP8 "
+			return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff };
+		}
+		if (chunkType === 0x5650384c) { // "VP8L"
+			const bits = view.getUint32(21, true);
+			return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+		}
+		if (chunkType === 0x56503858) { // "VP8X"
+			return {
+				width: (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)) + 1,
+				height: (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)) + 1
+			};
+		}
+		return null;
+	}
+
+	// JPEG: walk marker segments for a SOFn marker; its payload starts with height then width
+	if (view.getUint16(0) === 0xffd8) {
+		let offset = 2;
+		while (offset + 9 < bytes.length) {
+			if (view.getUint8(offset) !== 0xff) break;
+			const marker = view.getUint8(offset + 1);
+			// SOF0-SOF15, excluding DHT/JPG/DAC which share the range but aren't SOF markers
+			if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+				return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) };
+			}
+			offset += 2 + view.getUint16(offset + 2);
+		}
+		return null;
+	}
+
+	return null;
+}
+
 export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
@@ -247,10 +335,14 @@ export default {
 
 			// consumer_app_id = the game this item is used in
 			const appId = steamData.consumer_app_id || steamData.creator_app_id || null;
-			const gameName = appId ? await getGameName(appId, env, ctx) : null;
 
-			let imageWidth = steamData.preview_width;
-			let imageHeight = steamData.preview_height;
+			const [gameName, probedDimensions] = await Promise.all([
+				appId ? getGameName(appId, env, ctx) : Promise.resolve(null),
+				probeImageDimensions(previewUrl)
+			]);
+
+			let imageWidth = probedDimensions?.width || steamData.preview_width;
+			let imageHeight = probedDimensions?.height || steamData.preview_height;
 
 			if (!imageWidth || !imageHeight || imageWidth <= 0 || imageHeight <= 0) {
 				imageWidth = 1280;
@@ -612,6 +704,9 @@ function generateLandingPage(origin) {
 				<button class="copy-btn" data-copy="https://steamre.link/?id=1923990111&fast" title="Copy" aria-label="Copy fast mode URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
 			</div>
 			<p class="fast-hint">Fast mode fires the Steam launch immediately, no countdown. The <a href="https://github.com/Nonunon/SteamRelink" target="_blank">SteamRelink userscript</a> can also auto-close the tab afterward.</p>
+			<p style="margin-top: 20px;"><b>Not sure your browser will let this through?</b></p>
+			<p>This just fires the "Open in Steam?" prompt on its own, no countdown or redirect attached,<br><span class="fast-hint">So you can check (or tick "Always allow")</span></p>
+			<button type="button" id="test-steam-btn" class="nav-button">Test Steam Link</button>
 		</div>
 	`)}
 	<div class="rectangle converter-box">
@@ -642,6 +737,11 @@ function generateLandingPage(origin) {
 					console.error('Copy failed:', error);
 				}
 			});
+		});
+
+		// steam://open/main just focuses the Steam client, harmless either way
+		document.getElementById('test-steam-btn')?.addEventListener('click', () => {
+			window.location.href = 'steam://open/main';
 		});
 
 		function extractWorkshopId(raw) {
@@ -707,6 +807,7 @@ function generateWorkshopHTML(data) {
 	<meta property="og:image:width" content="${ogWidth}">
 	<meta property="og:image:height" content="${ogHeight}">
 	<meta property="og:url" content="${workshopUrl}">
+	<!-- summary was tried to dodge Discord's crop box, looked worse, don't re-try -->
 	<meta name="twitter:card" content="summary_large_image">
 	<meta http-equiv="refresh" content="${refreshDelay};url=${workshopUrl}">`;
 
