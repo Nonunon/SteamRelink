@@ -1,4 +1,3 @@
-const ICON_BASE = "";
 
 const STATS_EXCLUDED_IDS = new Map([
 	['1923990111', "Used as the example link, excluded so it doesn't inflate view counts."]
@@ -35,14 +34,14 @@ function renderHead(title, extra = "") {
 	<title>${title}</title>
 	<meta name="theme-color" content="#171a21">
 	${extra}
-	<link rel="icon" type="image/png" sizes="32x32" href="${ICON_BASE}/images/SteamRelink-32x32.png">
-	<link rel="icon" type="image/png" sizes="16x16" href="${ICON_BASE}/images/SteamRelink-16x16.png">
-	<link rel="stylesheet" href="${ICON_BASE}/styles.css">`;
+	<link rel="icon" type="image/png" sizes="32x32" href="/images/SteamRelink-32x32.png">
+	<link rel="icon" type="image/png" sizes="16x16" href="/images/SteamRelink-16x16.png">
+	<link rel="stylesheet" href="/styles.css">`;
 }
 
 function renderFooter() {
 	return `<a href="https://github.com/Nonunon/SteamRelink" target="_blank" rel="noopener" class="credit">
-		<img src="${ICON_BASE}/images/SteamRelink-32x32.png" alt="">
+		<img src="/images/SteamRelink-32x32.png" alt="">
 		<span>SteamRelink on GitHub</span>
 	</a>`;
 }
@@ -230,7 +229,9 @@ export default {
 			});
 		}
 
-		if (!/^\d+$/.test(workshopId)) {
+		// IDs are uint64, which tops out at 20 digits (current ones are 10), so
+		// this can't reject a real ID; it just stops junk from reaching Steam
+		if (!/^\d{1,20}$/.test(workshopId)) {
 			return new Response("Invalid workshop ID format", { status: 400 });
 		}
 
@@ -264,7 +265,8 @@ export default {
 		if (!cachedData && env.WORKSHOP_CACHE) {
 			try {
 				const rateData = await env.WORKSHOP_CACHE.get(rateLimitKey);
-				const { count = 0, resetTime = Date.now() } = rateData ? JSON.parse(rateData) : {};
+				// no record yet = expired window, so the first request opens the hour
+				const { count = 0, resetTime = 0 } = rateData ? JSON.parse(rateData) : {};
 				const now = Date.now();
 				const hourInMs = 3600000;
 
@@ -333,7 +335,8 @@ export default {
 
 			} catch (error) {
 				console.error("Steam API fetch error:", error);
-				return new Response("Failed to fetch Steam data: " + error.message, { status: 500 });
+				// details stay in the logs, not the public response
+				return new Response("Failed to fetch Steam data. Please try again later.", { status: 500 });
 			}
 
 			const title = steamData.title || "Untitled Workshop Item";
@@ -523,8 +526,8 @@ async function handleStats(request, env, ctx) {
 		const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
-	${renderHead("SteamRelink - Statistics", `<link rel="stylesheet" href="${ICON_BASE}/vendor/simplebar.min.css">`)}
-	<script src="${ICON_BASE}/vendor/simplebar.min.js" defer></script>
+	${renderHead("SteamRelink - Statistics", `<link rel="stylesheet" href="/vendor/simplebar.min.css">`)}
+	<script src="/vendor/simplebar.min.js" defer></script>
 </head>
 <body class="stats-body">
 	<div class="stats-container">
@@ -549,10 +552,17 @@ async function handleStats(request, env, ctx) {
 
 		${(allStats.length > 0 || excludedStats.length > 0) ? `
 		<div class="stats-filter">
-			<select id="game-filter">
-				<option value="all">All</option>
-				${uniqueGames.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}
-			</select>
+			<!-- custom listbox rather than a native select, so the open list matches the page on every platform -->
+			<div class="game-filter" id="game-filter">
+				<button type="button" class="game-filter-button" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by game">
+					<span class="game-filter-label">All</span>
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+				</button>
+				<ul class="game-filter-menu" role="listbox" hidden>
+					<li role="option" tabindex="-1" data-value="all" aria-selected="true">All</li>
+					${uniqueGames.map(g => `<li role="option" tabindex="-1" data-value="${escapeHtml(g)}" aria-selected="false">${escapeHtml(g)}</li>`).join('')}
+				</ul>
+			</div>
 		</div>
 		<div class="table-wrapper">
 		<table class="stats-table">
@@ -593,12 +603,67 @@ async function handleStats(request, env, ctx) {
 
 	${renderFooter()}
 	<script>
-		document.getElementById('game-filter')?.addEventListener('change', (e) => {
-			const selected = e.target.value;
-			document.querySelectorAll('.stats-table tbody tr').forEach(row => {
-				row.style.display = (selected === 'all' || row.dataset.game === selected) ? '' : 'none';
+		// game filter: button + listbox, keyboard works like a native select
+		(() => {
+			const filter = document.getElementById('game-filter');
+			if (!filter) return;
+			const button = filter.querySelector('.game-filter-button');
+			const label = filter.querySelector('.game-filter-label');
+			const menu = filter.querySelector('.game-filter-menu');
+			const options = [...menu.querySelectorAll('[role="option"]')];
+
+			const isOpen = () => !menu.hidden;
+			const selectedOption = () => options.find(o => o.getAttribute('aria-selected') === 'true') || options[0];
+
+			const open = () => {
+				menu.hidden = false;
+				button.setAttribute('aria-expanded', 'true');
+				selectedOption().focus();
+			};
+			const close = (refocus) => {
+				menu.hidden = true;
+				button.setAttribute('aria-expanded', 'false');
+				if (refocus) button.focus();
+			};
+
+			const choose = (option) => {
+				options.forEach(o => o.setAttribute('aria-selected', o === option ? 'true' : 'false'));
+				label.textContent = option.textContent;
+				const selected = option.dataset.value;
+				document.querySelectorAll('.stats-table tbody tr').forEach(row => {
+					row.style.display = (selected === 'all' || row.dataset.game === selected) ? '' : 'none';
+				});
+				close(true);
+			};
+
+			button.addEventListener('click', () => (isOpen() ? close(false) : open()));
+			button.addEventListener('keydown', (e) => {
+				if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+					e.preventDefault();
+					open();
+				}
 			});
-		});
+
+			options.forEach(option => option.addEventListener('click', () => choose(option)));
+
+			menu.addEventListener('keydown', (e) => {
+				const index = options.indexOf(document.activeElement);
+				const move = (to) => options[Math.max(0, Math.min(options.length - 1, to))].focus();
+				if (e.key === 'ArrowDown') move(index + 1);
+				else if (e.key === 'ArrowUp') move(index - 1);
+				else if (e.key === 'Home') move(0);
+				else if (e.key === 'End') move(options.length - 1);
+				else if (e.key === 'Enter' || e.key === ' ') { if (index >= 0) choose(options[index]); }
+				else if (e.key === 'Escape') close(true);
+				else if (e.key === 'Tab') { close(false); return; }
+				else return;
+				e.preventDefault();
+			});
+
+			document.addEventListener('pointerdown', (e) => {
+				if (isOpen() && !filter.contains(e.target)) close(false);
+			});
+		})();
 
 		// click-to-sort headers. No icons except a tiny arrow on the active column
 		(() => {
@@ -731,7 +796,7 @@ async function handleStats(request, env, ctx) {
 
 	} catch (error) {
 		console.error("Stats error:", error);
-		return new Response("Failed to load statistics: " + error.message, { status: 500 });
+		return new Response("Failed to load statistics. Please try again later.", { status: 500 });
 	}
 }
 
@@ -757,13 +822,13 @@ function generateLandingPage(origin) {
 			${renderInstructions()}
 			<p style="margin-top: 20px;"><b>Example:</b></p>
 			<div class="code-row">
-				<code>https://steamre.link/?id=1923990111</code>
-				<button class="copy-btn" data-copy="https://steamre.link/?id=1923990111" title="Copy" aria-label="Copy example URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+				<code>${origin}/?id=1923990111</code>
+				<button class="copy-btn" data-copy="${origin}/?id=1923990111" title="Copy" aria-label="Copy example URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
 			</div>
 			<p style="margin-top: 20px;"><b>Fast mode</b> (skips the 10-second wait):</p>
 			<div class="code-row">
-				<code>https://steamre.link/?id=1923990111&fast</code>
-				<button class="copy-btn" data-copy="https://steamre.link/?id=1923990111&fast" title="Copy" aria-label="Copy fast mode URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+				<code>${origin}/?id=1923990111&fast</code>
+				<button class="copy-btn" data-copy="${origin}/?id=1923990111&fast" title="Copy" aria-label="Copy fast mode URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
 			</div>
 			<p class="fast-hint">Fast mode fires the Steam launch immediately, no countdown. The <a href="https://github.com/Nonunon/SteamRelink" target="_blank">SteamRelink userscript</a> can also auto-close the tab afterward.</p>
 			<p style="margin-top: 20px;"><b>Not sure your browser will let this through?</b></p>

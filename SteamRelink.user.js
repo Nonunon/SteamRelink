@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SteamRelink Button
 // @namespace    https://steamre.link
-// @version      2.4
+// @version      2.5
 // @description  Adds a button to redirect Steam Workshop links to the custom SteamRelink page, and auto-closes SteamRelink fast-mode tabs shortly after steam:// fires (toggleable via the script manager's menu)
 // @icon         https://steamre.link/images/SteamRelink-32x32.png
 // @updateURL    https://raw.githubusercontent.com/Nonunon/SteamRelink/refs/heads/main/SteamRelink.user.js
@@ -173,6 +173,17 @@
                     color: #ffffff;
                 }
 
+                #sr-main-btn:focus-visible,
+                .sr-item:focus-visible {
+                    outline: 2px solid #66c0f4;
+                    outline-offset: -2px;
+                }
+
+                .sr-item:focus-visible {
+                    background: #2a475e;
+                    color: #ffffff;
+                }
+
                 .sr-feedback {
                     display: block;
                     padding: 5px 14px 7px;
@@ -190,7 +201,14 @@
             const mainBtn = document.createElement('button');
             mainBtn.id = 'sr-main-btn';
             mainBtn.textContent = 'SteamRelink';
+            // set on touch pointerdown further down; a first tap opens the menu instead
+            let touchTapOnClosedMenu = false;
             mainBtn.addEventListener('click', () => {
+                if (touchTapOnClosedMenu) {
+                    touchTapOnClosedMenu = false;
+                    showDropdown();
+                    return;
+                }
                 window.location.href = normalUrl;
             });
 
@@ -249,19 +267,51 @@
             dropdown.appendChild(feedback);
 
             let hideTimer;
+            const isOpen = () => dropdown.style.display === 'block';
             const showDropdown = () => {
                 clearTimeout(hideTimer);
                 dropdown.style.display = 'block';
+                mainBtn.setAttribute('aria-expanded', 'true');
+            };
+            const hideNow = () => {
+                clearTimeout(hideTimer);
+                dropdown.style.display = 'none';
+                feedback.style.display = 'none';
+                mainBtn.setAttribute('aria-expanded', 'false');
             };
             const hideDropdown = () => {
-                hideTimer = setTimeout(() => {
-                    dropdown.style.display = 'none';
-                    feedback.style.display = 'none';
-                }, 150);
+                hideTimer = setTimeout(hideNow, 150);
             };
 
+            mainBtn.setAttribute('aria-haspopup', 'true');
+            mainBtn.setAttribute('aria-expanded', 'false');
+
+            // mouse: hover, same as always
             wrapper.addEventListener('mouseenter', showDropdown);
             wrapper.addEventListener('mouseleave', hideDropdown);
+
+            // keyboard: tabbing onto the button opens the menu, tabbing past
+            // the last item closes it, Escape closes and returns to the button
+            wrapper.addEventListener('focusin', showDropdown);
+            wrapper.addEventListener('focusout', (e) => {
+                if (!wrapper.contains(e.relatedTarget)) hideDropdown();
+            });
+            wrapper.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && isOpen()) {
+                    hideNow();
+                    mainBtn.focus();
+                }
+            });
+
+            // touch has no hover, so the first tap opens the menu and a second
+            // tap on the button redirects. Recorded at pointerdown because the
+            // browser's emulated mouseenter/focus open the menu before click fires
+            mainBtn.addEventListener('pointerdown', (e) => {
+                touchTapOnClosedMenu = e.pointerType === 'touch' && !isOpen();
+            });
+            document.addEventListener('pointerdown', (e) => {
+                if (isOpen() && !wrapper.contains(e.target)) hideNow();
+            });
 
             wrapper.appendChild(mainBtn);
             wrapper.appendChild(dropdown);
