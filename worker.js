@@ -254,9 +254,13 @@ export default {
 			return new Response("Invalid workshop ID format", { status: 400 });
 		}
 
-		// rate limit only applies to uncached requests
-		const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
-		const rateLimitKey = `ratelimit:${clientIP}`;
+		// negative cache for missing/private ids lives in the edge cache, not KV,
+		// so junk ids cost no KV writes. Per Cloudflare location, which is fine
+		// for its job of keeping repeat hits off the Steam API
+		const notFoundKey = new Request(`${url.origin}/__notfound/${workshopId}`);
+		if (await caches.default.match(notFoundKey)) {
+			return new Response("Workshop item not found or is private", { status: 404 });
+		}
 
 		let cachedData = null;
 		if (env.WORKSHOP_CACHE) {
@@ -271,14 +275,10 @@ export default {
 		}
 
 		// entries cached before visibility/screenshot detection get refetched
-		// once, so items already sitting in the cache still get caught
-		if (cachedData && !cachedData.notFound && !('visibility' in cachedData && 'isScreenshot' in cachedData)) {
+		// once, so items already sitting in the cache still get caught (this
+		// also covers old KV "notFound" markers, which lack both fields)
+		if (cachedData && !('visibility' in cachedData && 'isScreenshot' in cachedData)) {
 			cachedData = null;
-		}
-
-		// negative cache hit: bail before touching Steam or the rate limiter
-		if (cachedData && cachedData.notFound) {
-			return new Response("Workshop item not found or is private", { status: 404 });
 		}
 
 		// a failed game-name lookup would otherwise stay blank for the item's
@@ -299,26 +299,20 @@ export default {
 			}
 		}
 
-		if (!cachedData && env.WORKSHOP_CACHE) {
+		// rate limit only applies to uncached requests. Uses the Workers
+		// rate-limiting binding ([[ratelimits]] in wrangler.toml), which costs no
+		// KV writes. It's approximate and per Cloudflare location (a probe let
+		// through several times the configured limit under a burst), but it still
+		// throttles a sustained scraper. Without the binding, lookups are unlimited
+		if (!cachedData && env.LOOKUP_LIMITER) {
+			const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
 			try {
-				const rateData = await env.WORKSHOP_CACHE.get(rateLimitKey);
-				// no record yet = expired window, so the first request opens the hour
-				const { count = 0, resetTime = 0 } = rateData ? JSON.parse(rateData) : {};
-				const now = Date.now();
-				const hourInMs = 3600000;
-
-				if (now > resetTime) {
-					ctx.waitUntil(
-						env.WORKSHOP_CACHE.put(rateLimitKey, JSON.stringify({ count: 1, resetTime: now + hourInMs }), { expirationTtl: 3600 })
-					);
-				} else if (count >= 50) {
+				const { success } = await env.LOOKUP_LIMITER.limit({ key: clientIP });
+				if (!success) {
 					return new Response("Rate limit exceeded. Please try again later.", { status: 429 });
-				} else {
-					ctx.waitUntil(
-						env.WORKSHOP_CACHE.put(rateLimitKey, JSON.stringify({ count: count + 1, resetTime }), { expirationTtl: 3600 })
-					);
 				}
 			} catch (error) {
+				// fail open: a limiter hiccup shouldn't take the site down
 				console.error("Rate limit check error:", error);
 			}
 		}
@@ -358,15 +352,10 @@ export default {
 
 				if (steamData.result !== 1) {
 					// negative cache so repeat hits on a bad link skip the API
-					if (env.WORKSHOP_CACHE) {
-						ctx.waitUntil(
-							env.WORKSHOP_CACHE.put(
-								workshopId,
-								JSON.stringify({ notFound: true }),
-								{ expirationTtl: 300 }
-							)
-						);
-					}
+					ctx.waitUntil(
+						caches.default.put(notFoundKey, new Response(null, { headers: { "Cache-Control": "max-age=300" } }))
+							.catch(error => console.error("Negative cache write error:", error))
+					);
 					return new Response("Workshop item not found or is private", { status: 404 });
 				}
 

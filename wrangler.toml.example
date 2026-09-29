@@ -10,6 +10,16 @@ compatibility_date = "2026-09-01"
 binding = "WORKSHOP_CACHE"
 id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
 
+[[ratelimits]]
+name = "LOOKUP_LIMITER"
+# any integer, unique within your Cloudflare account
+namespace_id = "1001"
+
+  # uncached lookups per IP; period must be 10 or 60 (seconds)
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
