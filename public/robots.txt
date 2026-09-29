@@ -1,0 +1,11 @@
+# Search engines: skip item pages (they just bounce to Steam, and crawler
+# visits would show up as views on /stats). Homepage and /stats are fine.
+# Link-preview bots (Discord, Slack, etc.) aren't listed, so embeds still work.
+User-agent: Googlebot
+User-agent: Bingbot
+User-agent: DuckDuckBot
+User-agent: YandexBot
+Disallow: /*id=
+
+User-agent: *
+Allow: /

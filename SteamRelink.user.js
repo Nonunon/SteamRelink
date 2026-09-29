@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SteamRelink Button
 // @namespace    https://steamre.link
-// @version      2.6
+// @version      2.7
 // @description  Adds a button to redirect Steam Workshop links to the custom SteamRelink page, and auto-closes SteamRelink fast-mode tabs shortly after steam:// fires (toggleable via the script manager's menu)
 // @icon         https://steamre.link/images/SteamRelink-32x32.png
 // @updateURL    https://raw.githubusercontent.com/Nonunon/SteamRelink/refs/heads/main/SteamRelink.user.js
@@ -9,7 +9,6 @@
 // @match        *://steamcommunity.com/sharedfiles/filedetails/*
 // @match        *://steamcommunity.com/workshop/filedetails/*
 // @match        https://steamre.link/*
-// @match        https://steamredirect.hi-nonunon.workers.dev/*
 // @grant        GM_addStyle
 // @grant        GM_setClipboard
 // @grant        window.close
@@ -318,7 +317,7 @@
             wrapper.appendChild(dropdown);
             document.body.appendChild(wrapper);
         }
-    } else if (hostname === 'steamre.link' || hostname === 'steamredirect.hi-nonunon.workers.dev') {
+    } else if (hostname === 'steamre.link') {
         if (!fastCloseEnabled) return;
 
         // empirical, not documented: 150ms works reliably in practice. If

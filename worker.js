@@ -1,4 +1,3 @@
-
 const STATS_EXCLUDED_IDS = new Map([
 	['1923990111', "Used as the example link, excluded so it doesn't inflate view counts."]
 ]);
@@ -228,6 +227,18 @@ export default {
 		const fast = url.searchParams.has("fast") || url.pathname === "/&fast";
 
 		if (!workshopId) {
+			// only the homepage gets the landing page; anything else without an id
+			// (robots.txt, favicon.ico, typos) is a real 404 instead of a copy of it
+			if (url.pathname !== "/" && url.pathname !== "/&fast") {
+				return new Response(generateNotFoundPage(), {
+					status: 404,
+					headers: {
+						"Content-Type": "text/html; charset=utf-8",
+						"Cache-Control": "public, max-age=3600"
+					}
+				});
+			}
+
 			const landingHTML = generateLandingPage(url.origin);
 			return new Response(landingHTML, {
 				headers: {
@@ -485,7 +496,7 @@ async function handleStats(request, env, ctx) {
 	}
 
 	// serve repeat loads from the edge cache (honors the max-age below) so they
-	// don't re-list KV. The Cache API is a no-op on workers.dev, custom domains only
+	// don't re-list KV. Custom domains only, which is why workers_dev is off in wrangler.toml
 	const cache = caches.default;
 	const cacheKey = new Request(new URL('/stats', request.url).toString());
 	const cachedResponse = await cache.match(cacheKey);
@@ -955,6 +966,26 @@ function generateLandingPage(origin) {
 </html>`;
 }
 
+function generateNotFoundPage() {
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+	${renderHead("SteamRelink - Not Found", '<meta name="robots" content="noindex">')}
+</head>
+<body>
+	${renderCard(`
+		<div class="text">
+			There's nothing here. SteamRelink links look like <code style="white-space: nowrap;">/?id=WORKSHOP_ID</code>.
+		</div>
+		<div style="text-align: center; margin-top: 10px;">
+			<a href="/" class="nav-button">Back to SteamRelink</a>
+		</div>
+	`)}
+	${renderFooter()}
+</body>
+</html>`;
+}
+
 function generateWorkshopHTML(data) {
 	const { title, previewUrl, imageWidth, imageHeight, workshopUrl, steamClientUrl, fast } = data;
 
@@ -972,6 +1003,8 @@ function generateWorkshopHTML(data) {
 	<meta property="og:url" content="${workshopUrl}">
 	<!-- summary was tried to dodge Discord's crop box, looked worse, don't re-try -->
 	<meta name="twitter:card" content="summary_large_image">
+	<!-- keeps item pages out of search results; link-preview bots don't read this -->
+	<meta name="robots" content="noindex">
 	<meta http-equiv="refresh" content="${refreshDelay};url=${workshopUrl}">`;
 
 	return `<!DOCTYPE html>

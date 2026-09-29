@@ -1,5 +1,9 @@
 name = "steamrelink"
 main = "worker.js"
+# serve only on the custom domain: the edge cache /stats relies on doesn't
+# work on workers.dev, so a public workers.dev URL would bypass it
+workers_dev = false
+preview_urls = false
 compatibility_date = "2026-09-01"
 
 [[kv_namespaces]]
