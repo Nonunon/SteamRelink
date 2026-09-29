@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SteamRelink Button
 // @namespace    https://steamre.link
-// @version      2.3
+// @version      2.4
 // @description  Adds a button to redirect Steam Workshop links to the custom SteamRelink page, and auto-closes SteamRelink fast-mode tabs shortly after steam:// fires (toggleable via the script manager's menu)
 // @icon         https://steamre.link/images/SteamRelink-32x32.png
 // @updateURL    https://raw.githubusercontent.com/Nonunon/SteamRelink/refs/heads/main/SteamRelink.user.js
@@ -16,19 +16,59 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.setClipboard
+// @grant        GM.registerMenuCommand
 // ==/UserScript==
 
-(function() {
+(async function() {
     'use strict';
+
+    // Greasemonkey 4 only has the async GM.* API, while Tampermonkey and
+    // Violentmonkey also have GM_*. Prefer GM_*, fall back to GM.*, and fall
+    // back again to plain browser APIs where GM4 has no equivalent at all.
+    // typeof is safe on undeclared names, so these checks never throw.
+    const gm = typeof GM !== 'undefined' ? GM : {};
+
+    const getValue = async (key, fallback) => {
+        if (typeof GM_getValue === 'function') return GM_getValue(key, fallback);
+        if (gm.getValue) return gm.getValue(key, fallback);
+        return fallback;
+    };
+
+    const setValue = (key, value) => {
+        if (typeof GM_setValue === 'function') return GM_setValue(key, value);
+        if (gm.setValue) return gm.setValue(key, value);
+    };
+
+    const setClipboard = (text) => {
+        if (typeof GM_setClipboard === 'function') return GM_setClipboard(text);
+        if (gm.setClipboard) return gm.setClipboard(text);
+        return navigator.clipboard.writeText(text);
+    };
+
+    const addStyle = (css) => {
+        if (typeof GM_addStyle === 'function') return GM_addStyle(css);
+        const style = document.createElement('style');
+        style.textContent = css;
+        (document.head || document.documentElement).appendChild(style);
+    };
+
+    const registerMenuCommand = (label, fn) => {
+        if (typeof GM_registerMenuCommand === 'function') return GM_registerMenuCommand(label, fn);
+        if (gm.registerMenuCommand) return gm.registerMenuCommand(label, fn);
+        // no menu API (Greasemonkey 4): the toggle just isn't offered
+    };
 
     const FAST_CLOSE_KEY = 'sr-fast-close-enabled';
     // defaults on to preserve existing behavior; flip off via the script manager's menu
-    const fastCloseEnabled = GM_getValue(FAST_CLOSE_KEY, true);
+    const fastCloseEnabled = await getValue(FAST_CLOSE_KEY, true);
 
-    GM_registerMenuCommand(
+    registerMenuCommand(
         fastCloseEnabled ? 'Disable Fast-Close' : 'Enable Fast-Close',
         () => {
-            GM_setValue(FAST_CLOSE_KEY, !fastCloseEnabled);
+            setValue(FAST_CLOSE_KEY, !fastCloseEnabled);
             // label only updates on next page load; that's a normal
             // limitation of GM_registerMenuCommand, not a bug
         }
@@ -45,7 +85,7 @@
             const normalUrl = `https://steamre.link/?id=${workshopId}`;
             const fastUrl   = `https://steamre.link/?id=${workshopId}&fast`;
 
-            GM_addStyle(`
+            addStyle(`
                 #sr-wrapper {
                     position: fixed;
                     top: 10px;
@@ -192,13 +232,13 @@
 
             copyItem.addEventListener('click', (e) => {
                 e.stopPropagation();
-                GM_setClipboard(normalUrl);
+                setClipboard(normalUrl);
                 showFeedback('Copied to clipboard.');
             });
 
             copyFastItem.addEventListener('click', (e) => {
                 e.stopPropagation();
-                GM_setClipboard(fastUrl);
+                setClipboard(fastUrl);
                 showFeedback('Copied to clipboard.');
             });
 

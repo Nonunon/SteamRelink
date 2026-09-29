@@ -210,7 +210,7 @@ export default {
 		const url = new URL(request.url);
 
 		if (url.pathname === '/stats') {
-			return handleStats(env);
+			return handleStats(request, env, ctx);
 		}
 
 		const workshopId = url.searchParams.get("id");
@@ -248,6 +248,12 @@ export default {
 			} catch (error) {
 				console.error("KV cache read error:", error);
 			}
+		}
+
+		// entries cached before visibility was tracked get refetched once, so
+		// unlisted items already sitting in the cache still get caught
+		if (cachedData && !cachedData.notFound && !('visibility' in cachedData)) {
+			cachedData = null;
 		}
 
 		// negative cache hit: bail before touching Steam or the rate limiter
@@ -357,7 +363,9 @@ export default {
 				workshopUrl: `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`,
 				steamClientUrl: `steam://url/CommunityFilePage/${workshopId}`,
 				gameId: appId,
-				gameName
+				gameName,
+				// 0 = public, 3 = unlisted; friends-only and private never get here (result !== 1)
+				visibility: steamData.visibility ?? null
 			};
 
 			if (env.WORKSHOP_CACHE) {
@@ -377,20 +385,35 @@ export default {
 
 		if (env.WORKSHOP_CACHE) {
 			const statsKey = `stats:${workshopId}`;
-			ctx.waitUntil(
-				env.WORKSHOP_CACHE.get(statsKey).then(data => {
-					const currentData = data ? JSON.parse(data) : { count: 0, title: workshopData.title, lastViewed: null };
-					currentData.count += 1;
-					currentData.title = workshopData.title;
-					if (workshopData.gameId) currentData.gameId = workshopData.gameId;
-					if (workshopData.gameName) currentData.gameName = workshopData.gameName;
-					currentData.lastViewed = new Date().toISOString();
-					// no TTL: view totals are permanent
-					return env.WORKSHOP_CACHE.put(statsKey, JSON.stringify(currentData));
-				}).catch(error => {
-					console.error("Analytics tracking error:", error);
-				})
-			);
+			if (workshopData.visibility === 0) {
+				ctx.waitUntil(
+					env.WORKSHOP_CACHE.get(statsKey).then(data => {
+						const currentData = data ? JSON.parse(data) : { count: 0, title: workshopData.title, lastViewed: null };
+						currentData.count += 1;
+						currentData.title = workshopData.title;
+						if (workshopData.gameId) currentData.gameId = workshopData.gameId;
+						if (workshopData.gameName) currentData.gameName = workshopData.gameName;
+						currentData.lastViewed = new Date().toISOString();
+						// no TTL: view totals are permanent. Metadata lets /stats read
+						// every row from list() alone instead of one get() per row
+						const metadata = statsMetadata(currentData);
+						return env.WORKSHOP_CACHE.put(statsKey, JSON.stringify(currentData), metadata ? { metadata } : {});
+					}).catch(error => {
+						console.error("Analytics tracking error:", error);
+					})
+				);
+			} else {
+				// unlisted items stay off the public /stats page, and any row recorded
+				// before visibility was tracked is purged. get() first so repeat hits
+				// on an unlisted link don't each spend a KV delete
+				ctx.waitUntil(
+					env.WORKSHOP_CACHE.get(statsKey).then(existing => {
+						if (existing) return env.WORKSHOP_CACHE.delete(statsKey);
+					}).catch(error => {
+						console.error("Unlisted stats purge error:", error);
+					})
+				);
+			}
 		}
 
 		const html = generateWorkshopHTML({ ...workshopData, fast });
@@ -404,19 +427,56 @@ export default {
 	}
 };
 
-async function handleStats(env) {
+// the subset of a stats row that /stats renders, stored as KV metadata so list() returns it directly
+function statsMetadata(stats) {
+	const metadata = {
+		count: stats.count,
+		title: stats.title,
+		lastViewed: stats.lastViewed,
+		gameName: stats.gameName || null
+	};
+	// KV caps metadata at 1024 bytes of serialized JSON; oversized rows skip
+	// it and /stats falls back to reading the value for them
+	return new TextEncoder().encode(JSON.stringify(metadata)).length <= 1024 ? metadata : null;
+}
+
+async function handleStats(request, env, ctx) {
 	if (!env.WORKSHOP_CACHE) {
 		return new Response("Analytics not available", { status: 503 });
 	}
 
+	// serve repeat loads from the edge cache (honors the max-age below) so they
+	// don't re-list KV. The Cache API is a no-op on workers.dev, custom domains only
+	const cache = caches.default;
+	const cacheKey = new Request(new URL('/stats', request.url).toString());
+	const cachedResponse = await cache.match(cacheKey);
+	if (cachedResponse) return cachedResponse;
+
 	try {
-		const { keys } = await env.WORKSHOP_CACHE.list({ prefix: 'stats:' });
+		// one list() call stops at 1000 keys, so follow the cursor
+		const keys = [];
+		let cursor;
+		do {
+			const page = await env.WORKSHOP_CACHE.list({ prefix: 'stats:', cursor });
+			keys.push(...page.keys);
+			cursor = page.list_complete ? null : page.cursor;
+		} while (cursor);
 
 		const statsPromises = keys.map(async key => {
-			const data = await env.WORKSHOP_CACHE.get(key.name);
-			if (!data) return null;
+			// rows written since metadata was added come back with list() itself;
+			// older rows need one get() each until their next view rewrites them
+			let statsData = key.metadata;
+			if (!statsData) {
+				try {
+					const data = await env.WORKSHOP_CACHE.get(key.name);
+					if (!data) return null;
+					statsData = JSON.parse(data);
+				} catch (error) {
+					console.error("Stats row read error:", key.name, error);
+					return null;
+				}
+			}
 
-			const statsData = JSON.parse(data);
 			const workshopId = key.name.replace('stats:', '');
 
 			return {
@@ -660,12 +720,14 @@ async function handleStats(env) {
 </body>
 </html>`;
 
-		return new Response(html, {
+		const response = new Response(html, {
 			headers: {
 				"Content-Type": "text/html; charset=utf-8",
 				"Cache-Control": "public, max-age=300"
 			}
 		});
+		ctx.waitUntil(cache.put(cacheKey, response.clone()));
+		return response;
 
 	} catch (error) {
 		console.error("Stats error:", error);

@@ -14,7 +14,7 @@ To deploy your own copy, copy [`wrangler.toml.example`](wrangler.toml.example) t
 - **URL Redirection**: Redirects links based on Steam Workshop IDs.
 - **Optimized for Discord**: Tailored for cleaner link handling in Discord channels.
 - **Lightweight & Simple**: Minimal and easy to use.
-- **Supports Unlisted Workshop Files**: Allows sharing of unlisted Steam Workshop files, as long as they are not private or restricted to friends-only visibility.
+- **Supports Unlisted Workshop Files**: Allows sharing of unlisted Steam Workshop files, as long as they are not private or restricted to friends-only visibility. Unlisted items are never shown on the public stats page.
 - **Link Converter**: Paste a full Steam Workshop URL, or just the numeric ID, into the built-in converter on the homepage and get a ready-to-share SteamRelink link, copied to your clipboard automatically.
 - **Usage Stats**: Visit [/stats](https://steamre.link/stats) to see total views, per-item view counts, and which game each linked item belongs to, with a filter to narrow the list down to one game.
 
@@ -110,7 +110,7 @@ Once installed, visiting a Steam Workshop item page adds a **SteamRelink** butto
 - **Copy Redirect Link**: copies the normal SteamRelink URL to your clipboard.
 - **Copy Fast Redirect Link**: copies the fast-mode URL to your clipboard.
 
-The script also auto-closes fast-mode SteamRelink tabs shortly after Steam picks up the link (Tampermonkey and Violentmonkey only, same as the Fast URL note above). This is on by default; right-click the script manager's icon to find a menu option to turn it off.
+The script also auto-closes fast-mode SteamRelink tabs shortly after Steam picks up the link (Tampermonkey and Violentmonkey only, same as the Fast URL note above). This is on by default; right-click the script manager's icon to find a menu option to turn it off. The button and dropdown work in all three managers.
 
 [![Install this script](https://img.shields.io/badge/Install%20User%20Script-green?style=for-the-badge)](https://raw.githubusercontent.com/Nonunon/SteamRelink/refs/heads/main/SteamRelink.user.js)
 
