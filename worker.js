@@ -251,9 +251,9 @@ export default {
 			}
 		}
 
-		// entries cached before visibility was tracked get refetched once, so
-		// unlisted items already sitting in the cache still get caught
-		if (cachedData && !cachedData.notFound && !('visibility' in cachedData)) {
+		// entries cached before visibility/screenshot detection get refetched
+		// once, so items already sitting in the cache still get caught
+		if (cachedData && !cachedData.notFound && !('visibility' in cachedData && 'isScreenshot' in cachedData)) {
 			cachedData = null;
 		}
 
@@ -339,16 +339,25 @@ export default {
 				return new Response("Failed to fetch Steam data. Please try again later.", { status: 500 });
 			}
 
-			const title = steamData.title || "Untitled Workshop Item";
 			const previewUrl = steamData.preview_url || "";
 
 			// consumer_app_id = the game this item is used in
 			const appId = steamData.consumer_app_id || steamData.creator_app_id || null;
 
+			// screenshots share Workshop's ID space and filedetails pages. They're
+			// published by app 760 (Steam's own screenshot uploader, which no game
+			// publishes Workshop content under) with a "<appid>/screenshots/" file
+			// path. Both must match, so a real Workshop item can't be caught by this
+			const isScreenshot = steamData.creator_app_id === 760 && /\/screenshots\//.test(steamData.filename || "");
+
 			const [gameName, probedDimensions] = await Promise.all([
 				appId ? getGameName(appId, env, ctx) : Promise.resolve(null),
 				probeImageDimensions(previewUrl)
 			]);
+
+			// screenshots have no title field, only an optional caption
+			const title = steamData.title
+				|| (isScreenshot ? `${gameName || "Steam"} Screenshot` : "Untitled Workshop Item");
 
 			let imageWidth = probedDimensions?.width || steamData.preview_width;
 			let imageHeight = probedDimensions?.height || steamData.preview_height;
@@ -368,7 +377,8 @@ export default {
 				gameId: appId,
 				gameName,
 				// 0 = public, 3 = unlisted; friends-only and private never get here (result !== 1)
-				visibility: steamData.visibility ?? null
+				visibility: steamData.visibility ?? null,
+				isScreenshot
 			};
 
 			if (env.WORKSHOP_CACHE) {
@@ -388,7 +398,8 @@ export default {
 
 		if (env.WORKSHOP_CACHE) {
 			const statsKey = `stats:${workshopId}`;
-			if (workshopData.visibility === 0) {
+			// only public Workshop items are counted; unlisted items and screenshots stay off /stats
+			if (workshopData.visibility === 0 && !workshopData.isScreenshot) {
 				ctx.waitUntil(
 					env.WORKSHOP_CACHE.get(statsKey).then(data => {
 						const currentData = data ? JSON.parse(data) : { count: 0, title: workshopData.title, lastViewed: null };
@@ -406,14 +417,13 @@ export default {
 					})
 				);
 			} else {
-				// unlisted items stay off the public /stats page, and any row recorded
-				// before visibility was tracked is purged. get() first so repeat hits
-				// on an unlisted link don't each spend a KV delete
+				// any row recorded before these checks existed is purged. get() first
+				// so repeat hits on an uncounted link don't each spend a KV delete
 				ctx.waitUntil(
 					env.WORKSHOP_CACHE.get(statsKey).then(existing => {
 						if (existing) return env.WORKSHOP_CACHE.delete(statsKey);
 					}).catch(error => {
-						console.error("Unlisted stats purge error:", error);
+						console.error("Uncounted stats purge error:", error);
 					})
 				);
 			}
