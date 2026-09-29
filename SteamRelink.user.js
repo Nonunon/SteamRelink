@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         SteamRelink Button
 // @namespace    https://steamre.link
-// @version      2.5
+// @version      2.6
 // @description  Adds a button to redirect Steam Workshop links to the custom SteamRelink page, and auto-closes SteamRelink fast-mode tabs shortly after steam:// fires (toggleable via the script manager's menu)
 // @icon         https://steamre.link/images/SteamRelink-32x32.png
 // @updateURL    https://raw.githubusercontent.com/Nonunon/SteamRelink/refs/heads/main/SteamRelink.user.js
 // @downloadURL  https://raw.githubusercontent.com/Nonunon/SteamRelink/refs/heads/main/SteamRelink.user.js
-// @match        *://steamcommunity.com/sharedfiles/filedetails/?id=*
-// @match        *://steamcommunity.com/workshop/filedetails/?id=*
+// @match        *://steamcommunity.com/sharedfiles/filedetails/*
+// @match        *://steamcommunity.com/workshop/filedetails/*
 // @match        https://steamre.link/*
 // @match        https://steamredirect.hi-nonunon.workers.dev/*
 // @grant        GM_addStyle
@@ -78,7 +78,8 @@
 
     if (hostname === 'steamcommunity.com') {
         const url = window.location.href;
-        const match = url.match(/steamcommunity\.com\/(?:sharedfiles|workshop)\/filedetails\/\?id=(\d+)/);
+        // id doesn't have to be the first query param (e.g. ?searchtext=&id=123)
+        const match = url.match(/steamcommunity\.com\/(?:sharedfiles|workshop)\/filedetails\/\?(?:[^#]*&)?id=(\d+)/);
 
         if (match && match[1]) {
             const workshopId = match[1];

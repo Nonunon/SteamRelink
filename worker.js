@@ -112,6 +112,14 @@ async function getGameName(appId, env, ctx) {
 		return name;
 	} catch (error) {
 		console.error("Game name lookup error:", error);
+		// store API down: cache the miss for 1h too, so cached items retrying
+		// a blank game name don't hit the store on every view during an outage
+		if (env.WORKSHOP_CACHE) {
+			ctx.waitUntil(
+				env.WORKSHOP_CACHE.put(cacheKey, JSON.stringify({ name: null }), { expirationTtl: 3600 })
+					.catch(() => {})
+			);
+		}
 		return null;
 	}
 }
@@ -260,6 +268,24 @@ export default {
 		// negative cache hit: bail before touching Steam or the rate limiter
 		if (cachedData && cachedData.notFound) {
 			return new Response("Workshop item not found or is private", { status: 404 });
+		}
+
+		// a failed game-name lookup would otherwise stay blank for the item's
+		// whole 7d cache. getGameName caches failures for 1h, so this retries
+		// the store API at most hourly per game, not on every view
+		if (cachedData && cachedData.gameId && !cachedData.gameName) {
+			const gameName = await getGameName(cachedData.gameId, env, ctx);
+			if (gameName) {
+				cachedData.gameName = gameName;
+				// screenshot titles are built from the game name
+				if (cachedData.isScreenshot && cachedData.title === "Steam Screenshot") {
+					cachedData.title = `${gameName} Screenshot`;
+				}
+				ctx.waitUntil(
+					env.WORKSHOP_CACHE.put(workshopId, JSON.stringify(cachedData), { expirationTtl: 604800 })
+						.catch(error => console.error("KV cache write error:", error))
+				);
+			}
 		}
 
 		if (!cachedData && env.WORKSHOP_CACHE) {
