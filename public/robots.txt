@@ -6,6 +6,8 @@ User-agent: Bingbot
 User-agent: DuckDuckBot
 User-agent: YandexBot
 Disallow: /*id=
+Disallow: /api/
 
 User-agent: *
+Disallow: /api/
 Allow: /

@@ -1,0 +1,5 @@
+# static assets skip the worker, so they get their baseline headers here
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000

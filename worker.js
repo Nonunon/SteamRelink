@@ -2,6 +2,44 @@ const STATS_EXCLUDED_IDS = new Map([
 	['1923990111', "Used as the example link, excluded so it doesn't inflate view counts."]
 ]);
 
+// view beacons from user agents that look automated (crawlers, scripted
+// clients, headless browsers) are ignored, so only real visits count. App
+// names (discord, slack, twitter...) are deliberately absent: their preview
+// bots run no JS so never beacon, but their in-app browsers are real users
+const BOT_UA_PATTERN = /bot|crawl|spider|slurp|facebookexternalhit|embedly|headless|phantom|puppeteer|playwright|selenium|lighthouse|curl|wget|python|go-http-client|java\/|okhttp|node-fetch|axios|undici|libwww|httpclient|postman|insomnia/i;
+
+// one counted view per IP per item in this window
+const VIEW_DEDUPE_SECONDS = 1800;
+
+// inline styles stay allowed (a few elements still use style=""), scripts are same-origin only
+const SECURITY_HEADERS = {
+	"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	"X-Content-Type-Options": "nosniff",
+	"Referrer-Policy": "strict-origin-when-cross-origin",
+	"Permissions-Policy": "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+	"Strict-Transport-Security": "max-age=31536000",
+	"Cross-Origin-Opener-Policy": "same-origin"
+};
+
+function htmlHeaders(cacheControl) {
+	return {
+		...SECURITY_HEADERS,
+		"Content-Type": "text/html; charset=utf-8",
+		"Cache-Control": cacheControl
+	};
+}
+
+// plain-text error bodies; nosniff keeps browsers from guessing them into HTML
+function textResponse(body, status) {
+	return new Response(body, {
+		status,
+		headers: {
+			"Content-Type": "text/plain; charset=utf-8",
+			"X-Content-Type-Options": "nosniff"
+		}
+	});
+}
+
 function escapeHtml(str) {
 	return String(str)
 		.replace(/&/g, '&amp;')
@@ -219,6 +257,10 @@ export default {
 			return handleStats(request, env, ctx);
 		}
 
+		if (url.pathname === '/api/view') {
+			return handleView(request, url, env, ctx);
+		}
+
 		const workshopId = url.searchParams.get("id");
 		// undocumented: a URL with no "?" before it, like /&fast?id=123, puts
 		// "&fast" literally into the pathname instead of the query string
@@ -232,26 +274,20 @@ export default {
 			if (url.pathname !== "/" && url.pathname !== "/&fast") {
 				return new Response(generateNotFoundPage(), {
 					status: 404,
-					headers: {
-						"Content-Type": "text/html; charset=utf-8",
-						"Cache-Control": "public, max-age=3600"
-					}
+					headers: htmlHeaders("public, max-age=3600")
 				});
 			}
 
 			const landingHTML = generateLandingPage(url.origin);
 			return new Response(landingHTML, {
-				headers: {
-					"Content-Type": "text/html; charset=utf-8",
-					"Cache-Control": "public, max-age=3600"
-				}
+				headers: htmlHeaders("public, max-age=3600")
 			});
 		}
 
 		// IDs are uint64, which tops out at 20 digits (current ones are 10), so
 		// this can't reject a real ID; it just stops junk from reaching Steam
 		if (!/^\d{1,20}$/.test(workshopId)) {
-			return new Response("Invalid workshop ID format", { status: 400 });
+			return textResponse("Invalid workshop ID format", 400);
 		}
 
 		// negative cache for missing/private ids lives in the edge cache, not KV,
@@ -259,7 +295,7 @@ export default {
 		// for its job of keeping repeat hits off the Steam API
 		const notFoundKey = new Request(`${url.origin}/__notfound/${workshopId}`);
 		if (await caches.default.match(notFoundKey)) {
-			return new Response("Workshop item not found or is private", { status: 404 });
+			return textResponse("Workshop item not found or is private", 404);
 		}
 
 		let cachedData = null;
@@ -309,7 +345,7 @@ export default {
 			try {
 				const { success } = await env.LOOKUP_LIMITER.limit({ key: clientIP });
 				if (!success) {
-					return new Response("Rate limit exceeded. Please try again later.", { status: 429 });
+					return textResponse("Rate limit exceeded. Please try again later.", 429);
 				}
 			} catch (error) {
 				// fail open: a limiter hiccup shouldn't take the site down
@@ -345,7 +381,7 @@ export default {
 				const json = await response.json();
 
 				if (!json.response || !json.response.publishedfiledetails || !json.response.publishedfiledetails[0]) {
-					return new Response("Invalid Steam API response", { status: 502 });
+					return textResponse("Invalid Steam API response", 502);
 				}
 
 				steamData = json.response.publishedfiledetails[0];
@@ -356,13 +392,13 @@ export default {
 						caches.default.put(notFoundKey, new Response(null, { headers: { "Cache-Control": "max-age=300" } }))
 							.catch(error => console.error("Negative cache write error:", error))
 					);
-					return new Response("Workshop item not found or is private", { status: 404 });
+					return textResponse("Workshop item not found or is private", 404);
 				}
 
 			} catch (error) {
 				console.error("Steam API fetch error:", error);
 				// details stay in the logs, not the public response
-				return new Response("Failed to fetch Steam data. Please try again later.", { status: 500 });
+				return textResponse("Failed to fetch Steam data. Please try again later.", 500);
 			}
 
 			const previewUrl = steamData.preview_url || "";
@@ -422,49 +458,104 @@ export default {
 			}
 		}
 
-		if (env.WORKSHOP_CACHE) {
+		// views are counted by the client beacon (POST /api/view), not here, so
+		// bots and repeat loads of a cached page can't spend KV writes. This
+		// only cleans up rows for items that must not be counted
+		if (env.WORKSHOP_CACHE && !(workshopData.visibility === 0 && !workshopData.isScreenshot)) {
+			// any row recorded before these checks existed is purged. get() first
+			// so repeat hits on an uncounted link don't each spend a KV delete
 			const statsKey = `stats:${workshopId}`;
-			// only public Workshop items are counted; unlisted items and screenshots stay off /stats
-			if (workshopData.visibility === 0 && !workshopData.isScreenshot) {
-				ctx.waitUntil(
-					env.WORKSHOP_CACHE.get(statsKey).then(data => {
-						const currentData = data ? JSON.parse(data) : { count: 0, title: workshopData.title, lastViewed: null };
-						currentData.count += 1;
-						currentData.title = workshopData.title;
-						if (workshopData.gameId) currentData.gameId = workshopData.gameId;
-						if (workshopData.gameName) currentData.gameName = workshopData.gameName;
-						currentData.lastViewed = new Date().toISOString();
-						// no TTL: view totals are permanent. Metadata lets /stats read
-						// every row from list() alone instead of one get() per row
-						const metadata = statsMetadata(currentData);
-						return env.WORKSHOP_CACHE.put(statsKey, JSON.stringify(currentData), metadata ? { metadata } : {});
-					}).catch(error => {
-						console.error("Analytics tracking error:", error);
-					})
-				);
-			} else {
-				// any row recorded before these checks existed is purged. get() first
-				// so repeat hits on an uncounted link don't each spend a KV delete
-				ctx.waitUntil(
-					env.WORKSHOP_CACHE.get(statsKey).then(existing => {
-						if (existing) return env.WORKSHOP_CACHE.delete(statsKey);
-					}).catch(error => {
-						console.error("Uncounted stats purge error:", error);
-					})
-				);
-			}
+			ctx.waitUntil(
+				env.WORKSHOP_CACHE.get(statsKey).then(existing => {
+					if (existing) return env.WORKSHOP_CACHE.delete(statsKey);
+				}).catch(error => {
+					console.error("Uncounted stats purge error:", error);
+				})
+			);
 		}
 
-		const html = generateWorkshopHTML({ ...workshopData, fast });
+		const html = generateWorkshopHTML({ ...workshopData, workshopId, fast });
 
 		return new Response(html, {
-			headers: {
-				"Content-Type": "text/html; charset=utf-8",
-				"Cache-Control": "public, max-age=3600"
-			}
+			headers: htmlHeaders("public, max-age=3600")
 		});
 	}
 };
+
+// POST /api/view?id=N, the client beacon that counts a view. Always 204 for a
+// well-formed request so the response says nothing about whether it counted.
+// Never calls Steam: only items already in the KV item cache can be counted
+async function handleView(request, url, env, ctx) {
+	if (request.method !== 'POST') {
+		return new Response(null, { status: 405, headers: { "Allow": "POST", "X-Content-Type-Options": "nosniff" } });
+	}
+
+	const workshopId = url.searchParams.get("id");
+	if (!workshopId || !/^\d{1,20}$/.test(workshopId)) {
+		return textResponse("Invalid workshop ID format", 400);
+	}
+
+	const done = () => new Response(null, { status: 204, headers: { "X-Content-Type-Options": "nosniff" } });
+	if (!env.WORKSHOP_CACHE) return done();
+
+	const userAgent = request.headers.get("User-Agent");
+	if (!userAgent || BOT_UA_PATTERN.test(userAgent)) return done();
+
+	// browsers label cross-site requests; a beacon forged from another site isn't a visit.
+	// Older browsers don't send it, so absent is allowed
+	const site = request.headers.get("Sec-Fetch-Site");
+	if (site && site !== "same-origin") return done();
+
+	ctx.waitUntil(
+		countView(workshopId, request, url, env).catch(error => {
+			console.error("View beacon error:", error);
+		})
+	);
+	return done();
+}
+
+async function countView(workshopId, request, url, env) {
+	// dedupe lives in the edge cache (no KV writes). The IP is hashed so raw
+	// addresses are never stored
+	const ip = request.headers.get("CF-Connecting-IP") || 'unknown';
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip));
+	const ipHash = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+	const dedupeKey = new Request(`${url.origin}/__viewed/${workshopId}/${ipHash}`);
+
+	if (await caches.default.match(dedupeKey)) return;
+	// marked before the KV work so concurrent beacons from one IP count once
+	await caches.default.put(dedupeKey, new Response(null, { headers: { "Cache-Control": `max-age=${VIEW_DEDUPE_SECONDS}` } }));
+
+	const cached = await env.WORKSHOP_CACHE.get(workshopId);
+	if (!cached) return;
+
+	let workshopData;
+	try {
+		workshopData = JSON.parse(cached);
+	} catch {
+		return;
+	}
+
+	// only public Workshop items are counted; unlisted items and screenshots stay off /stats
+	if (!workshopData || workshopData.visibility !== 0 || workshopData.isScreenshot) return;
+
+	await recordView(workshopId, workshopData, env);
+}
+
+async function recordView(workshopId, workshopData, env) {
+	const statsKey = `stats:${workshopId}`;
+	const data = await env.WORKSHOP_CACHE.get(statsKey);
+	const currentData = data ? JSON.parse(data) : { count: 0, title: workshopData.title, lastViewed: null };
+	currentData.count += 1;
+	currentData.title = workshopData.title;
+	if (workshopData.gameId) currentData.gameId = workshopData.gameId;
+	if (workshopData.gameName) currentData.gameName = workshopData.gameName;
+	currentData.lastViewed = new Date().toISOString();
+	// no TTL: view totals are permanent. Metadata lets /stats read
+	// every row from list() alone instead of one get() per row
+	const metadata = statsMetadata(currentData);
+	await env.WORKSHOP_CACHE.put(statsKey, JSON.stringify(currentData), metadata ? { metadata } : {});
+}
 
 // the subset of a stats row that /stats renders, stored as KV metadata so list() returns it directly
 function statsMetadata(stats) {
@@ -481,7 +572,7 @@ function statsMetadata(stats) {
 
 async function handleStats(request, env, ctx) {
 	if (!env.WORKSHOP_CACHE) {
-		return new Response("Analytics not available", { status: 503 });
+		return textResponse("Analytics not available", 503);
 	}
 
 	// serve repeat loads from the edge cache (honors the max-age below) so they
@@ -638,201 +729,19 @@ async function handleStats(request, env, ctx) {
 	</div>
 
 	${renderFooter()}
-	<script>
-		// game filter: button + listbox, keyboard works like a native select
-		(() => {
-			const filter = document.getElementById('game-filter');
-			if (!filter) return;
-			const button = filter.querySelector('.game-filter-button');
-			const label = filter.querySelector('.game-filter-label');
-			const menu = filter.querySelector('.game-filter-menu');
-			const options = [...menu.querySelectorAll('[role="option"]')];
-
-			const isOpen = () => !menu.hidden;
-			const selectedOption = () => options.find(o => o.getAttribute('aria-selected') === 'true') || options[0];
-
-			const open = () => {
-				menu.hidden = false;
-				button.setAttribute('aria-expanded', 'true');
-				selectedOption().focus();
-			};
-			const close = (refocus) => {
-				menu.hidden = true;
-				button.setAttribute('aria-expanded', 'false');
-				if (refocus) button.focus();
-			};
-
-			const choose = (option) => {
-				options.forEach(o => o.setAttribute('aria-selected', o === option ? 'true' : 'false'));
-				label.textContent = option.textContent;
-				const selected = option.dataset.value;
-				document.querySelectorAll('.stats-table tbody tr').forEach(row => {
-					row.style.display = (selected === 'all' || row.dataset.game === selected) ? '' : 'none';
-				});
-				close(true);
-			};
-
-			button.addEventListener('click', () => (isOpen() ? close(false) : open()));
-			button.addEventListener('keydown', (e) => {
-				if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-					e.preventDefault();
-					open();
-				}
-			});
-
-			options.forEach(option => option.addEventListener('click', () => choose(option)));
-
-			menu.addEventListener('keydown', (e) => {
-				const index = options.indexOf(document.activeElement);
-				const move = (to) => options[Math.max(0, Math.min(options.length - 1, to))].focus();
-				if (e.key === 'ArrowDown') move(index + 1);
-				else if (e.key === 'ArrowUp') move(index - 1);
-				else if (e.key === 'Home') move(0);
-				else if (e.key === 'End') move(options.length - 1);
-				else if (e.key === 'Enter' || e.key === ' ') { if (index >= 0) choose(options[index]); }
-				else if (e.key === 'Escape') close(true);
-				else if (e.key === 'Tab') { close(false); return; }
-				else return;
-				e.preventDefault();
-			});
-
-			document.addEventListener('pointerdown', (e) => {
-				if (isOpen() && !filter.contains(e.target)) close(false);
-			});
-		})();
-
-		// click-to-sort headers. No icons except a tiny arrow on the active column
-		(() => {
-			const tbody = document.querySelector('.stats-table tbody');
-			if (!tbody) return;
-
-			// comparators read the row's own data-* attributes, set server-side
-			const getters = {
-				rank: row => Number(row.dataset.rank),
-				title: row => row.dataset.title || '',
-				views: row => Number(row.dataset.views),
-				// 'Never' sorts as the oldest possible date
-				lastviewed: row => {
-					const iso = row.querySelector('.last-viewed')?.dataset.iso;
-					const time = iso ? new Date(iso).getTime() : NaN;
-					return isNaN(time) ? 0 : time;
-				}
-			};
-
-			// direction the first click on each column starts with
-			const defaultDirection = { rank: 'asc', title: 'asc', views: 'desc', lastviewed: 'desc' };
-
-			const applySort = (column, direction) => {
-				const getter = getters[column];
-				const rows = [...tbody.querySelectorAll('tr')];
-				rows.sort((a, b) => {
-					// excluded rows (masked rank/views, not counted toward the
-					// leaderboard) always sort last, regardless of column/direction
-					const aExcluded = a.dataset.excluded === 'true';
-					const bExcluded = b.dataset.excluded === 'true';
-					if (aExcluded !== bExcluded) return aExcluded ? 1 : -1;
-					if (aExcluded && bExcluded) return (a.dataset.title || '').localeCompare(b.dataset.title || '');
-
-					const av = getter(a);
-					const bv = getter(b);
-					const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
-					return direction === 'asc' ? cmp : -cmp;
-				});
-				rows.forEach(row => tbody.appendChild(row));
-
-				// scroll position was meaningful for the old row order, not the new one
-				const contentWrapper = document.querySelector('.table-wrapper .simplebar-content-wrapper');
-				if (contentWrapper) contentWrapper.scrollTop = 0;
-			};
-
-			const setArrow = th => {
-				document.querySelectorAll('.stats-table thead th[data-sort] .sort-arrow').forEach(el => el.remove());
-				if (!th) return;
-				const arrow = document.createElement('span');
-				arrow.className = 'sort-arrow';
-				arrow.textContent = th.dataset.currentDirection === 'asc' ? ' ▲' : ' ▼';
-				th.appendChild(arrow);
-			};
-
-			// 3-click cycle: default direction, opposite, then back to rank
-			// ascending with no arrow shown
-			let activeColumn = null;
-			let clickStep = 0;
-
-			document.querySelectorAll('.stats-table thead th[data-sort]').forEach(th => {
-				th.addEventListener('click', () => {
-					const column = th.dataset.sort;
-					if (column !== activeColumn) clickStep = 0;
-					clickStep = (clickStep + 1) % 3;
-					activeColumn = column;
-
-					if (clickStep === 0) {
-						applySort('rank', 'asc');
-						setArrow(null);
-						activeColumn = null;
-						return;
-					}
-
-					const direction = clickStep === 1 ? defaultDirection[column] : (defaultDirection[column] === 'asc' ? 'desc' : 'asc');
-					applySort(column, direction);
-					th.dataset.currentDirection = direction;
-					setArrow(th);
-				});
-			});
-		})();
-
-		// formatted here, not server-side, so it reflects the viewer's own timezone
-		document.querySelectorAll('.last-viewed[data-iso]').forEach(cell => {
-			const iso = cell.dataset.iso;
-			const d = new Date(iso);
-			if (!iso || isNaN(d)) {
-				cell.textContent = 'Never';
-				return;
-			}
-			const date = d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit', year: 'numeric' });
-			const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-			cell.innerHTML = '<span class="lv-date"></span><span class="lv-time"></span>';
-			cell.querySelector('.lv-date').textContent = date;
-			cell.querySelector('.lv-time').textContent = time;
-		});
-
-		// waiting for DOMContentLoaded guarantees the deferred SimpleBar script
-		// has run. Scoped to just this element, not the page-wide auto-init.
-		document.addEventListener('DOMContentLoaded', () => {
-			const wrapper = document.querySelector('.table-wrapper');
-			if (!wrapper || !window.SimpleBar) return;
-
-			new SimpleBar(wrapper);
-
-			// the sticky <thead> is inside SimpleBar's scrolled content, so its
-			// track would otherwise span the header row too; offset it to start
-			// below the header instead
-			const thead = wrapper.querySelector('thead');
-			const track = wrapper.querySelector('.simplebar-track.simplebar-vertical');
-			if (thead && track) {
-				const syncTrackOffset = () => {
-					track.style.top = thead.offsetHeight + 'px';
-				};
-				syncTrackOffset();
-				new ResizeObserver(syncTrackOffset).observe(thead);
-			}
-		});
-	</script>
+	<script src="/js/stats.js" defer></script>
 </body>
 </html>`;
 
 		const response = new Response(html, {
-			headers: {
-				"Content-Type": "text/html; charset=utf-8",
-				"Cache-Control": "public, max-age=300"
-			}
+			headers: htmlHeaders("public, max-age=300")
 		});
 		ctx.waitUntil(cache.put(cacheKey, response.clone()));
 		return response;
 
 	} catch (error) {
 		console.error("Stats error:", error);
-		return new Response("Failed to load statistics. Please try again later.", { status: 500 });
+		return textResponse("Failed to load statistics. Please try again later.", 500);
 	}
 }
 
@@ -889,68 +798,7 @@ function generateLandingPage(origin) {
 		<div id="converter-error" class="converter-error" hidden></div>
 	</div>
 	${renderFooter()}
-	<script>
-		document.querySelectorAll('.copy-btn').forEach(btn => {
-			btn.addEventListener('click', async () => {
-				try {
-					await navigator.clipboard.writeText(btn.dataset.copy);
-					btn.classList.add('copied');
-					setTimeout(() => btn.classList.remove('copied'), 1200);
-				} catch (error) {
-					console.error('Copy failed:', error);
-				}
-			});
-		});
-
-		// steam://open/main just focuses the Steam client, harmless either way
-		document.getElementById('test-steam-btn')?.addEventListener('click', () => {
-			window.location.href = 'steam://open/main';
-		});
-
-		function extractWorkshopId(raw) {
-			const trimmed = raw.trim();
-			if (!trimmed) return null;
-			// \\d, not \d: this text is itself inside an outer template literal
-			if (/^\\d+$/.test(trimmed)) return trimmed;
-			const match = trimmed.match(/[?&]id=(\\d+)/);
-			return match ? match[1] : null;
-		}
-
-		const converterInput = document.getElementById('converter-input');
-		const convertBtn = document.getElementById('convert-btn');
-		const converterBox = document.querySelector('.converter-box');
-		const converterError = document.getElementById('converter-error');
-		const converterCopyBtn = document.getElementById('converter-copy-btn');
-		const fastToggle = document.getElementById('fast-toggle-input');
-
-		function runConvert() {
-			const id = extractWorkshopId(converterInput.value);
-			if (!id) {
-				converterError.textContent = "Couldn't find a workshop ID in that. Paste the full Workshop URL or just the numeric ID.";
-				converterError.hidden = false;
-				return;
-			}
-			converterError.hidden = true;
-			const converted = window.location.origin + '/?id=' + id + (fastToggle.checked ? '&fast' : '');
-			converterInput.value = converted;
-			converterCopyBtn.dataset.copy = converted;
-			converterCopyBtn.hidden = false;
-			converterBox.classList.add('expanded');
-
-			// best-effort auto-copy; the visible button is still a manual fallback
-			navigator.clipboard.writeText(converted).then(() => {
-				converterCopyBtn.classList.add('copied');
-				setTimeout(() => converterCopyBtn.classList.remove('copied'), 1200);
-			}).catch(error => {
-				console.error('Auto-copy failed:', error);
-			});
-		}
-
-		convertBtn.addEventListener('click', runConvert);
-		converterInput.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter') runConvert();
-		});
-	</script>
+	<script src="/js/landing.js" defer></script>
 </body>
 </html>`;
 }
@@ -976,7 +824,7 @@ function generateNotFoundPage() {
 }
 
 function generateWorkshopHTML(data) {
-	const { title, previewUrl, imageWidth, imageHeight, workshopUrl, steamClientUrl, fast } = data;
+	const { title, previewUrl, imageWidth, imageHeight, workshopUrl, workshopId, fast } = data;
 
 	const safeTitle = escapeHtml(title);
 	const safePreviewUrl = escapeHtml(previewUrl);
@@ -1001,7 +849,7 @@ function generateWorkshopHTML(data) {
 <head>
 	${renderHead(`SteamRelink::${safeTitle}`, extraHead)}
 </head>
-<body>
+<body data-workshop-id="${workshopId}" data-fast="${fast ? 1 : 0}">
 	${renderCard(`
 		${renderIntro()}
 		<div class="link-section" id="link-section">
@@ -1014,38 +862,7 @@ function generateWorkshopHTML(data) {
 		</div>
 	`)}
 	${renderFooter()}
-	<script>
-		const fast = ${fast ? 'true' : 'false'};
-
-		// not for Discord's scraper (reads raw og: tags, no JS); gives the
-		// browser's async steam:// permission check time to resolve before
-		// the fallback navigation below can cancel it mid-flight
-		setTimeout(() => {
-			window.location.href = "${steamClientUrl}";
-		}, fast ? 0 : 1000);
-
-		setTimeout(() => {
-			window.location.href = "${workshopUrl}";
-		}, fast ? 300 : 10000);
-
-		if (!fast) {
-			let countdown = ${refreshDelay};
-			const countdownElement = document.getElementById('countdown');
-			const countdownInterval = setInterval(() => {
-				countdown--;
-				countdownElement.textContent = countdown;
-				countdownElement.classList.remove('tick');
-				void countdownElement.offsetWidth; // forces reflow so the animation replays
-				countdownElement.classList.add('tick');
-				if (countdown <= 3) {
-					countdownElement.classList.add('urgent');
-				}
-				if (countdown <= 0) {
-					clearInterval(countdownInterval);
-				}
-			}, 1000);
-		}
-	</script>
+	<script src="/js/workshop.js" defer></script>
 </body>
 </html>`;
 }
