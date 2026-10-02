@@ -16,7 +16,7 @@ To deploy your own copy, copy [`wrangler.toml.example`](wrangler.toml.example) t
 - **Lightweight & Simple**: Minimal and easy to use.
 - **Supports Unlisted Workshop Files**: Allows sharing of unlisted Steam Workshop files, as long as they are not private or restricted to friends-only visibility. Unlisted items are never shown on the public stats page.
 - **Link Converter**: Paste a full Steam Workshop URL, or just the numeric ID, into the built-in converter on the homepage and get a ready-to-share SteamRelink link, copied to your clipboard automatically.
-- **Usage Stats**: Visit [/stats](https://steamre.link/stats) to see total views, per-item view counts, and which game each linked item belongs to, with a filter to narrow the list down to one game.
+- **Usage Stats**: Visit [/stats](https://steamre.link/stats) to see total views, per-item view counts, and which game each linked item belongs to, with a filter to narrow the list down to one game. Only human views count: a view is logged when a real browser opens the page, so Discord's link previews, crawlers and bots don't move the numbers, and coming back to the same link within a short while counts once.
 
 ## How to Use
 

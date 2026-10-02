@@ -11,6 +11,10 @@ const BOT_UA_PATTERN = /bot|crawl|spider|slurp|facebookexternalhit|embedly|headl
 // one counted view per IP per item in this window
 const VIEW_DEDUPE_SECONDS = 1800;
 
+// outbound fetch timeouts, so a hung upstream can't pin a request open
+const STEAM_API_TIMEOUT_MS = 5000;
+const IMAGE_PROBE_TIMEOUT_MS = 2000;
+
 // inline styles stay allowed (a few elements still use style=""), scripts are same-origin only
 const SECURITY_HEADERS = {
 	"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -38,6 +42,10 @@ function textResponse(body, status) {
 			"X-Content-Type-Options": "nosniff"
 		}
 	});
+}
+
+function workshopPageUrl(id) {
+	return `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
 }
 
 function escapeHtml(str) {
@@ -135,7 +143,9 @@ async function getGameName(appId, env, ctx) {
 			ids: [{ appid: Number(appId) }],
 			context: { country_code: "US" }
 		});
-		const response = await fetch(`https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=${encodeURIComponent(inputJson)}`);
+		const response = await fetch(`https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=${encodeURIComponent(inputJson)}`, {
+			signal: AbortSignal.timeout(STEAM_API_TIMEOUT_MS)
+		});
 		if (!response.ok) throw new Error(`GetItems returned ${response.status}`);
 		const json = await response.json();
 		const name = json?.response?.store_items?.[0]?.name || null;
@@ -143,6 +153,7 @@ async function getGameName(appId, env, ctx) {
 		if (env.WORKSHOP_CACHE) {
 			ctx.waitUntil(
 				env.WORKSHOP_CACHE.put(cacheKey, JSON.stringify({ name }), name ? {} : { expirationTtl: 3600 })
+					.catch(error => console.error("Game name cache write error:", error))
 			);
 		}
 
@@ -166,7 +177,11 @@ async function probeImageDimensions(url) {
 	if (!url) return null;
 
 	try {
-		const response = await fetch(url, { headers: { Range: "bytes=0-131071" } });
+		const response = await fetch(url, {
+			headers: { Range: "bytes=0-131071" },
+			// also aborts the body stream below, which throws into the catch
+			signal: AbortSignal.timeout(IMAGE_PROBE_TIMEOUT_MS)
+		});
 		if (!response.ok || !response.body) return null;
 
 		// stop at ~128KB even if the origin ignores Range and streams the whole image back
@@ -310,6 +325,7 @@ export default {
 			}
 		}
 
+		// TODO(after 2026-10-06): dead code once every entry cached before 2026-09-29 has expired (7d TTL). Safe to delete then.
 		// entries cached before visibility/screenshot detection get refetched
 		// once, so items already sitting in the cache still get caught (this
 		// also covers old KV "notFound" markers, which lack both fields)
@@ -371,7 +387,8 @@ export default {
 					body: formData,
 					headers: {
 						"Content-Type": "application/x-www-form-urlencoded"
-					}
+					},
+					signal: AbortSignal.timeout(STEAM_API_TIMEOUT_MS)
 				});
 
 				if (!response.ok) {
@@ -434,8 +451,6 @@ export default {
 				previewUrl,
 				imageWidth,
 				imageHeight,
-				workshopUrl: `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`,
-				steamClientUrl: `steam://url/CommunityFilePage/${workshopId}`,
 				gameId: appId,
 				gameName,
 				// 0 = public, 3 = unlisted; friends-only and private never get here (result !== 1)
@@ -444,34 +459,31 @@ export default {
 			};
 
 			if (env.WORKSHOP_CACHE) {
-				try {
+				ctx.waitUntil(
+					env.WORKSHOP_CACHE.put(
+						workshopId,
+						JSON.stringify(workshopData),
+						{ expirationTtl: 604800 } // 7d
+					).catch(error => console.error("KV cache write error:", error))
+				);
+
+				// views are counted by the client beacon (POST /api/view), not here,
+				// so bots and repeat loads of a cached page can't spend KV writes.
+				// This only cleans up rows for items that must not be counted. Only
+				// fresh fetches check: a stale row gets purged at the latest when
+				// the 7d item cache expires and refetches, so cached views stay
+				// KV-read free. get() first so a purge only deletes when a row exists
+				if (!(workshopData.visibility === 0 && !workshopData.isScreenshot)) {
+					const statsKey = `stats:${workshopId}`;
 					ctx.waitUntil(
-						env.WORKSHOP_CACHE.put(
-							workshopId,
-							JSON.stringify(workshopData),
-							{ expirationTtl: 604800 } // 7d
-						)
+						env.WORKSHOP_CACHE.get(statsKey).then(existing => {
+							if (existing) return env.WORKSHOP_CACHE.delete(statsKey);
+						}).catch(error => {
+							console.error("Uncounted stats purge error:", error);
+						})
 					);
-				} catch (error) {
-					console.error("KV cache write error:", error);
 				}
 			}
-		}
-
-		// views are counted by the client beacon (POST /api/view), not here, so
-		// bots and repeat loads of a cached page can't spend KV writes. This
-		// only cleans up rows for items that must not be counted
-		if (env.WORKSHOP_CACHE && !(workshopData.visibility === 0 && !workshopData.isScreenshot)) {
-			// any row recorded before these checks existed is purged. get() first
-			// so repeat hits on an uncounted link don't each spend a KV delete
-			const statsKey = `stats:${workshopId}`;
-			ctx.waitUntil(
-				env.WORKSHOP_CACHE.get(statsKey).then(existing => {
-					if (existing) return env.WORKSHOP_CACHE.delete(statsKey);
-				}).catch(error => {
-					console.error("Uncounted stats purge error:", error);
-				})
-			);
 		}
 
 		const html = generateWorkshopHTML({ ...workshopData, workshopId, fast });
@@ -614,7 +626,7 @@ async function handleStats(request, env, ctx) {
 				title: statsData.title || 'Unknown',
 				count: statsData.count || 0,
 				lastViewed: statsData.lastViewed || 'Never',
-				url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`,
+				url: workshopPageUrl(workshopId),
 				gameName: statsData.gameName || null
 			};
 		});
@@ -640,7 +652,7 @@ async function handleStats(request, env, ctx) {
 					id,
 					title: data.title || 'Unknown',
 					gameName: data.gameName || null,
-					url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`,
+					url: workshopPageUrl(id),
 					reason: STATS_EXCLUDED_IDS.get(id)
 				};
 			} catch (error) {
@@ -734,7 +746,7 @@ async function handleStats(request, env, ctx) {
 </html>`;
 
 		const response = new Response(html, {
-			headers: htmlHeaders("public, max-age=300")
+			headers: htmlHeaders("public, max-age=900")
 		});
 		ctx.waitUntil(cache.put(cacheKey, response.clone()));
 		return response;
@@ -824,19 +836,22 @@ function generateNotFoundPage() {
 }
 
 function generateWorkshopHTML(data) {
-	const { title, previewUrl, imageWidth, imageHeight, workshopUrl, workshopId, fast } = data;
+	const { title, previewUrl, imageWidth, imageHeight, workshopId, fast } = data;
+	const workshopUrl = workshopPageUrl(workshopId);
 
 	const safeTitle = escapeHtml(title);
 	const safePreviewUrl = escapeHtml(previewUrl);
-	const ogWidth = imageWidth;
-	const ogHeight = imageHeight;
 	const refreshDelay = fast ? 2 : 10;
 
-	const extraHead = `<meta property="og:type" content="website">
-	<meta property="og:title" content="SteamRelink::${safeTitle}">
+	// no preview means no image tags at all: an empty og:image can get resolved
+	// to the page's own URL by some scrapers, a missing one is just a text embed
+	const ogImage = previewUrl ? `
 	<meta property="og:image" content="${safePreviewUrl}">
-	<meta property="og:image:width" content="${ogWidth}">
-	<meta property="og:image:height" content="${ogHeight}">
+	<meta property="og:image:width" content="${imageWidth}">
+	<meta property="og:image:height" content="${imageHeight}">` : '';
+
+	const extraHead = `<meta property="og:type" content="website">
+	<meta property="og:title" content="SteamRelink::${safeTitle}">${ogImage}
 	<meta property="og:url" content="${workshopUrl}">
 	<!-- summary was tried to dodge Discord's crop box, looked worse, don't re-try -->
 	<meta name="twitter:card" content="summary_large_image">
@@ -849,7 +864,7 @@ function generateWorkshopHTML(data) {
 <head>
 	${renderHead(`SteamRelink::${safeTitle}`, extraHead)}
 </head>
-<body data-workshop-id="${workshopId}" data-fast="${fast ? 1 : 0}">
+<body data-workshop-id="${workshopId}" data-fast="${fast ? 1 : 0}" data-delay="${refreshDelay}">
 	${renderCard(`
 		${renderIntro()}
 		<div class="link-section" id="link-section">

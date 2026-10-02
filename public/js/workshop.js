@@ -1,5 +1,6 @@
 const id = document.body.dataset.workshopId;
 const fast = document.body.dataset.fast === '1';
+const delay = Number(document.body.dataset.delay);
 
 // first thing, before any timer: the userscript closes fast-mode tabs after
 // ~150ms. webdriver check skips automated browsers (they can't be told apart
@@ -18,10 +19,10 @@ setTimeout(() => {
 
 setTimeout(() => {
 	window.location.href = workshopUrl;
-}, fast ? 300 : 10000);
+}, fast ? 300 : delay * 1000);
 
 if (!fast) {
-	let countdown = 10;
+	let countdown = delay;
 	const countdownElement = document.getElementById('countdown');
 	const countdownInterval = setInterval(() => {
 		countdown--;
