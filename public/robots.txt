@@ -11,3 +11,5 @@ Disallow: /api/
 User-agent: *
 Disallow: /api/
 Allow: /
+
+Sitemap: https://steamre.link/sitemap.xml

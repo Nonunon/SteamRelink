@@ -44,6 +44,9 @@ function textResponse(body, status) {
 	});
 }
 
+const LANDING_DESCRIPTION = "Share Steam Workshop items in Discord with direct client links";
+const STATS_DESCRIPTION = "See how often SteamRelink links get opened, broken down by Workshop item and game";
+
 function workshopPageUrl(id) {
 	return `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
 }
@@ -272,6 +275,16 @@ export default {
 			return handleStats(request, env, ctx);
 		}
 
+		if (url.pathname === '/sitemap.xml') {
+			return new Response(generateSitemap(url.origin), {
+				headers: {
+					"Content-Type": "application/xml; charset=utf-8",
+					"Cache-Control": "public, max-age=86400",
+					"X-Content-Type-Options": "nosniff"
+				}
+			});
+		}
+
 		if (url.pathname === '/api/view') {
 			return handleView(request, url, env, ctx);
 		}
@@ -302,15 +315,17 @@ export default {
 		// IDs are uint64, which tops out at 20 digits (current ones are 10), so
 		// this can't reject a real ID; it just stops junk from reaching Steam
 		if (!/^\d{1,20}$/.test(workshopId)) {
-			return textResponse("Invalid workshop ID format", 400);
+			return errorResponse(400, "Invalid Link", `That doesn't look like a Workshop ID. SteamRelink links look like <code style="white-space: nowrap;">/?id=WORKSHOP_ID</code>, where the ID is only digits.`);
 		}
+
+		const notFoundItem = () => errorResponse(404, "Item Not Found", "This Workshop item doesn't exist, was removed, or is private or friends-only. Steam might still show it if you have access.", workshopId);
 
 		// negative cache for missing/private ids lives in the edge cache, not KV,
 		// so junk ids cost no KV writes. Per Cloudflare location, which is fine
 		// for its job of keeping repeat hits off the Steam API
 		const notFoundKey = new Request(`${url.origin}/__notfound/${workshopId}`);
 		if (await caches.default.match(notFoundKey)) {
-			return textResponse("Workshop item not found or is private", 404);
+			return notFoundItem();
 		}
 
 		let cachedData = null;
@@ -361,7 +376,7 @@ export default {
 			try {
 				const { success } = await env.LOOKUP_LIMITER.limit({ key: clientIP });
 				if (!success) {
-					return textResponse("Rate limit exceeded. Please try again later.", 429);
+					return errorResponse(429, "Slow Down", "Too many new links opened in a short time. Wait a minute and try again, or open the item on Steam directly.", workshopId, { "Retry-After": "60" });
 				}
 			} catch (error) {
 				// fail open: a limiter hiccup shouldn't take the site down
@@ -398,7 +413,7 @@ export default {
 				const json = await response.json();
 
 				if (!json.response || !json.response.publishedfiledetails || !json.response.publishedfiledetails[0]) {
-					return textResponse("Invalid Steam API response", 502);
+					return errorResponse(502, "Steam Error", "Steam sent back something unexpected. Try again in a bit, or open the item on Steam directly.", workshopId);
 				}
 
 				steamData = json.response.publishedfiledetails[0];
@@ -409,13 +424,13 @@ export default {
 						caches.default.put(notFoundKey, new Response(null, { headers: { "Cache-Control": "max-age=300" } }))
 							.catch(error => console.error("Negative cache write error:", error))
 					);
-					return textResponse("Workshop item not found or is private", 404);
+					return notFoundItem();
 				}
 
 			} catch (error) {
 				console.error("Steam API fetch error:", error);
 				// details stay in the logs, not the public response
-				return textResponse("Failed to fetch Steam data. Please try again later.", 500);
+				return errorResponse(502, "Steam Unavailable", "Couldn't reach Steam to look this item up. Try again in a bit, or open the item on Steam directly.", workshopId);
 			}
 
 			const previewUrl = steamData.preview_url || "";
@@ -584,13 +599,14 @@ function statsMetadata(stats) {
 
 async function handleStats(request, env, ctx) {
 	if (!env.WORKSHOP_CACHE) {
-		return textResponse("Analytics not available", 503);
+		return errorResponse(503, "Stats Unavailable", "Statistics aren't available on this deployment.");
 	}
 
 	// serve repeat loads from the edge cache (honors the max-age below) so they
 	// don't re-list KV. Custom domains only, which is why workers_dev is off in wrangler.toml
+	const origin = new URL(request.url).origin;
 	const cache = caches.default;
-	const cacheKey = new Request(new URL('/stats', request.url).toString());
+	const cacheKey = new Request(`${origin}/stats`);
 	const cachedResponse = await cache.match(cacheKey);
 	if (cachedResponse) return cachedResponse;
 
@@ -665,7 +681,13 @@ async function handleStats(request, env, ctx) {
 		const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
-	${renderHead("SteamRelink - Statistics", `<link rel="stylesheet" href="/vendor/simplebar.min.css">`)}
+	${renderHead("SteamRelink - Statistics", `<meta name="description" content="${STATS_DESCRIPTION}">
+	<meta property="og:type" content="website">
+	<meta property="og:title" content="SteamRelink - Statistics">
+	<meta property="og:description" content="${STATS_DESCRIPTION}">
+	<meta property="og:image" content="${origin}/images/SteamRelink-512x512.png">
+	<meta name="twitter:card" content="summary">
+	<link rel="stylesheet" href="/vendor/simplebar.min.css">`)}
 	<script src="/vendor/simplebar.min.js" defer></script>
 </head>
 <body class="stats-body">
@@ -753,14 +775,15 @@ async function handleStats(request, env, ctx) {
 
 	} catch (error) {
 		console.error("Stats error:", error);
-		return textResponse("Failed to load statistics. Please try again later.", 500);
+		return errorResponse(500, "Stats Unavailable", "Failed to load statistics. Please try again later.");
 	}
 }
 
 function generateLandingPage(origin) {
-	const extraHead = `<meta property="og:type" content="website">
+	const extraHead = `<meta name="description" content="${LANDING_DESCRIPTION}">
+	<meta property="og:type" content="website">
 	<meta property="og:title" content="SteamRelink - Steam Workshop Link Helper">
-	<meta property="og:description" content="Share Steam Workshop items in Discord with direct client links">
+	<meta property="og:description" content="${LANDING_DESCRIPTION}">
 	<meta property="og:image" content="${origin}/images/SteamRelink-512x512.png">
 	<meta name="twitter:card" content="summary">
 	<link rel="dns-prefetch" href="//steamcommunity.com">
@@ -815,24 +838,50 @@ function generateLandingPage(origin) {
 </html>`;
 }
 
-function generateNotFoundPage() {
+// styled error page; messageHtml is trusted markup, workshopId (already
+// validated as digits) adds a link to the item's Steam page
+function generateErrorPage(heading, messageHtml, workshopId = null) {
+	const steamButton = workshopId
+		? `<a href="${workshopPageUrl(workshopId)}" class="nav-button">View on Steam</a>`
+		: '';
+
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
-	${renderHead("SteamRelink - Not Found", '<meta name="robots" content="noindex">')}
+	${renderHead(`SteamRelink - ${heading}`, '<meta name="robots" content="noindex">')}
 </head>
 <body>
 	${renderCard(`
 		<div class="text">
-			There's nothing here. SteamRelink links look like <code style="white-space: nowrap;">/?id=WORKSHOP_ID</code>.
+			${messageHtml}
 		</div>
-		<div style="text-align: center; margin-top: 10px;">
+		<div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+			${steamButton}
 			<a href="/" class="nav-button">Back to SteamRelink</a>
 		</div>
 	`)}
 	${renderFooter()}
 </body>
 </html>`;
+}
+
+function errorResponse(status, heading, messageHtml, workshopId = null, extraHeaders = {}) {
+	return new Response(generateErrorPage(heading, messageHtml, workshopId), {
+		status,
+		headers: { ...htmlHeaders("no-store"), ...extraHeaders }
+	});
+}
+
+function generateNotFoundPage() {
+	return generateErrorPage("Not Found", `There's nothing here. SteamRelink links look like <code style="white-space: nowrap;">/?id=WORKSHOP_ID</code>.`);
+}
+
+function generateSitemap(origin) {
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+	<url><loc>${origin}/</loc></url>
+	<url><loc>${origin}/stats</loc></url>
+</urlset>`;
 }
 
 function generateWorkshopHTML(data) {
@@ -870,7 +919,7 @@ function generateWorkshopHTML(data) {
 		<div class="link-section" id="link-section">
 			<p>Opening <a href="${workshopUrl}" target="_blank">
 			<strong>${safeTitle}</strong></a> in Steam...</p>
-			${previewUrl ? `<img src="${safePreviewUrl}" alt="Preview Image" style="max-width: 100%; margin-top: 10px; height: auto;" />` : ''}
+			${previewUrl ? `<img src="${safePreviewUrl}" alt="${safeTitle}" style="max-width: 100%; margin-top: 10px; height: auto;" />` : ''}
 		</div>
 		<div class="instructions">
 			${renderInstructions(refreshDelay)}
