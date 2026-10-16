@@ -340,14 +340,6 @@ export default {
 			}
 		}
 
-		// TODO(after 2026-10-06): dead code once every entry cached before 2026-09-29 has expired (7d TTL). Safe to delete then.
-		// entries cached before visibility/screenshot detection get refetched
-		// once, so items already sitting in the cache still get caught (this
-		// also covers old KV "notFound" markers, which lack both fields)
-		if (cachedData && !('visibility' in cachedData && 'isScreenshot' in cachedData)) {
-			cachedData = null;
-		}
-
 		// a failed game-name lookup would otherwise stay blank for the item's
 		// whole 7d cache. getGameName caches failures for 1h, so this retries
 		// the store API at most hourly per game, not on every view
@@ -602,13 +594,20 @@ async function handleStats(request, env, ctx) {
 		return errorResponse(503, "Stats Unavailable", "Statistics aren't available on this deployment.");
 	}
 
-	// serve repeat loads from the edge cache (honors the max-age below) so they
-	// don't re-list KV. Custom domains only, which is why workers_dev is off in wrangler.toml
+	// serve repeat loads from the edge cache so they don't re-list KV. Custom
+	// domains only, which is why workers_dev is off in wrangler.toml. Cloudflare
+	// hands Cache API hits back with max-age rewritten to the zone's 4h Browser
+	// Cache TTL, so browsers would keep the page for 4h. Restore 900 on hits, and
+	// check Age too so an edge TTL override can't stretch the lifetime either
 	const origin = new URL(request.url).origin;
 	const cache = caches.default;
 	const cacheKey = new Request(`${origin}/stats`);
 	const cachedResponse = await cache.match(cacheKey);
-	if (cachedResponse) return cachedResponse;
+	if (cachedResponse && Number(cachedResponse.headers.get('Age') || 0) < 900) {
+		const response = new Response(cachedResponse.body, cachedResponse);
+		response.headers.set("Cache-Control", "public, max-age=900");
+		return response;
+	}
 
 	try {
 		// one list() call stops at 1000 keys, so follow the cursor
