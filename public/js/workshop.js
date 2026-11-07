@@ -17,8 +17,10 @@ setTimeout(() => {
 	window.location.href = steamClientUrl;
 }, fast ? 0 : 1000);
 
+// replace, not href: this page must not stay in history, or pressing Back on
+// the Workshop page reloads it, which fires steam:// and bounces forward again
 setTimeout(() => {
-	window.location.href = workshopUrl;
+	window.location.replace(workshopUrl);
 }, fast ? 300 : delay * 1000);
 
 if (!fast) {

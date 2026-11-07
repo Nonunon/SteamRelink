@@ -931,7 +931,8 @@ function generateWorkshopHTML(data) {
 	<meta name="twitter:card" content="summary_large_image">
 	<!-- keeps item pages out of search results; link-preview bots don't read this -->
 	<meta name="robots" content="noindex">
-	<meta http-equiv="refresh" content="${refreshDelay};url=${workshopUrl}">`;
+	<!-- no-JS fallback only: with JS, workshop.js redirects without leaving this page in history -->
+	<noscript><meta http-equiv="refresh" content="${refreshDelay};url=${workshopUrl}"></noscript>`;
 
 	return `<!DOCTYPE html>
 <html lang="en">
