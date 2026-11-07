@@ -259,8 +259,13 @@
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape') hide();
 	});
-	// capture, since the table scrolls inside SimpleBar and scroll doesn't bubble
-	document.addEventListener('scroll', hide, true);
+	// capture, since the table scrolls inside SimpleBar and scroll doesn't bubble.
+	// Tabbing to a row scrolls it into view, so a focused tip follows instead of closing
+	document.addEventListener('scroll', () => {
+		if (!anchor) return;
+		if (anchor === document.activeElement) show(anchor);
+		else hide();
+	}, true);
 })();
 
 // formatted here, not server-side, so it reflects the viewer's own timezone
