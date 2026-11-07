@@ -47,6 +47,15 @@ function textResponse(body, status) {
 const LANDING_DESCRIPTION = "Share Steam Workshop items in Discord with direct client links";
 const STATS_DESCRIPTION = "See how often SteamRelink links get opened, broken down by Workshop item and game";
 
+// one form per item, so 0123 and 123 can't become separate cache keys and
+// stats rows. Null means it can't be an ID: IDs are uint64, which tops out at
+// 20 digits (current ones are 10), so this just stops junk from reaching Steam
+function canonicalWorkshopId(rawId) {
+	if (!/^\d{1,20}$/.test(rawId)) return null;
+	const id = rawId.replace(/^0+(?=\d)/, '');
+	return BigInt(id) <= 0xffffffffffffffffn ? id : null;
+}
+
 function workshopPageUrl(id) {
 	return `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
 }
@@ -289,14 +298,14 @@ export default {
 			return handleView(request, url, env, ctx);
 		}
 
-		const workshopId = url.searchParams.get("id");
+		const rawId = url.searchParams.get("id");
 		// undocumented: a URL with no "?" before it, like /&fast?id=123, puts
 		// "&fast" literally into the pathname instead of the query string
 		// (there's no real "?" yet for "&" to mean anything), so it needs its
 		// own check here rather than showing up in searchParams
 		const fast = url.searchParams.has("fast") || url.pathname === "/&fast";
 
-		if (!workshopId) {
+		if (!rawId) {
 			// only the homepage gets the landing page; anything else without an id
 			// (robots.txt, favicon.ico, typos) is a real 404 instead of a copy of it
 			if (url.pathname !== "/" && url.pathname !== "/&fast") {
@@ -312,9 +321,8 @@ export default {
 			});
 		}
 
-		// IDs are uint64, which tops out at 20 digits (current ones are 10), so
-		// this can't reject a real ID; it just stops junk from reaching Steam
-		if (!/^\d{1,20}$/.test(workshopId)) {
+		const workshopId = canonicalWorkshopId(rawId);
+		if (!workshopId) {
 			return errorResponse(400, "Invalid Link", `That doesn't look like a Workshop ID. SteamRelink links look like <code style="white-space: nowrap;">/?id=WORKSHOP_ID</code>, where the ID is only digits.`);
 		}
 
@@ -509,8 +517,8 @@ async function handleView(request, url, env, ctx) {
 		return new Response(null, { status: 405, headers: { "Allow": "POST", "X-Content-Type-Options": "nosniff" } });
 	}
 
-	const workshopId = url.searchParams.get("id");
-	if (!workshopId || !/^\d{1,20}$/.test(workshopId)) {
+	const workshopId = canonicalWorkshopId(url.searchParams.get("id"));
+	if (!workshopId) {
 		return textResponse("Invalid workshop ID format", 400);
 	}
 
