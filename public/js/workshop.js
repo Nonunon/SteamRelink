@@ -50,6 +50,6 @@ document.getElementById('open-steam').addEventListener('click', () => {
 	clearTimeout(fallbackTimer);
 	clearInterval(countdownInterval);
 	const status = document.getElementById('redirect-status');
-	status.textContent = "Redirect paused, so it can't interrupt Steam's prompt.";
+	status.textContent = 'Redirect paused';
 	status.classList.add('paused');
 });
