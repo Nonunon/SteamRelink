@@ -946,6 +946,11 @@ function generateWorkshopHTML(data) {
 			<p>Opening <a href="${workshopUrl}" target="_blank">
 			<strong>${safeTitle}</strong></a> in Steam...</p>
 			${previewUrl ? `<img src="${safePreviewUrl}" alt="${safeTitle}" style="max-width: 100%; margin-top: 10px; height: auto;" />` : ''}
+			<div class="item-actions">
+				<a href="steam://url/CommunityFilePage/${workshopId}" id="open-steam" class="nav-button">Open in Steam</a>
+				<a href="${workshopUrl}" class="nav-button">Open in Browser</a>
+			</div>
+			<p class="fast-hint" id="redirect-paused" hidden>Redirect paused, so it can't interrupt Steam's prompt.</p>
 		</div>
 		<div class="instructions">
 			${renderInstructions(refreshDelay)}

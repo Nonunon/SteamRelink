@@ -189,6 +189,25 @@ body {
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0px 4px 8px rgba(0, 0, 0, 0.3);
 }
 
+/* manual retry for when the automatic steam:// prompt gets dismissed or blocked */
+.item-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+/* outranks .link-section a:hover, which underlines plain links */
+.item-actions a:hover {
+    text-decoration: none;
+}
+
+#redirect-paused {
+    margin: 8px 0 0;
+    font-weight: normal;
+}
+
 /* countdown pulse, text-only */
 #countdown {
     display: inline-block;
