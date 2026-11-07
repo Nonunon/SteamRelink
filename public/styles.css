@@ -272,19 +272,28 @@ button:focus-visible {
     text-decoration: none;
 }
 
-#redirect-paused {
-    margin: 8px 0 0;
+.redirect-status {
+    margin: 10px 0 0;
+    font-size: 13px;
     font-weight: normal;
+    color: #c7d5e0;
 }
 
-/* countdown pulse, text-only */
+.redirect-status.paused {
+    font-size: 12px;
+    color: #8f98a0;
+}
+
+/* countdown pulse, text-only. Tabular digits so the line doesn't shift as it
+   ticks, and a small scale because a transform doesn't push nearby text away */
 #countdown {
     display: inline-block;
+    font-variant-numeric: tabular-nums;
     transition: transform 0.15s ease, color 0.15s ease;
 }
 
 #countdown.tick {
-    transform: scale(1.3);
+    transform: scale(1.15);
 }
 
 #countdown.urgent {

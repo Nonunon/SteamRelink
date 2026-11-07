@@ -24,9 +24,9 @@ const fallbackTimer = setTimeout(() => {
 }, fast ? 300 : delay * 1000);
 
 let countdownInterval;
-const countdownElement = document.getElementById('countdown');
 
 if (!fast) {
+	const countdownElement = document.getElementById('countdown');
 	let countdown = delay;
 	countdownInterval = setInterval(() => {
 		countdown--;
@@ -49,6 +49,7 @@ document.getElementById('open-steam').addEventListener('click', () => {
 	clearTimeout(steamTimer);
 	clearTimeout(fallbackTimer);
 	clearInterval(countdownInterval);
-	countdownElement.closest('li').hidden = true;
-	document.getElementById('redirect-paused').hidden = false;
+	const status = document.getElementById('redirect-status');
+	status.textContent = "Redirect paused, so it can't interrupt Steam's prompt.";
+	status.classList.add('paused');
 });

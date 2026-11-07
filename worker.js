@@ -122,12 +122,7 @@ function renderIntro() {
 		</div>`;
 }
 
-// countdownSeconds: pass a number for the live workshop-page countdown, omit for the static landing-page text
-function renderInstructions(countdownSeconds = null) {
-	const step6 = countdownSeconds !== null
-		? `<b><span id='countdown'>${countdownSeconds}</span> seconds</b>`
-		: `<b>10 seconds</b>`;
-
+function renderInstructions() {
 	return `<p><b>How to Use SteamRelink:</b></p>
 			<ol class="steps">
 				<li>Go to the <i>Steam Workshop</i> item you want to share.</li>
@@ -135,7 +130,7 @@ function renderInstructions(countdownSeconds = null) {
 				<li>Add it to this page's URL as <code>?id=WORKSHOP_ID</code>.</li>
 				<li>Open the URL in your browser.</li>
 				<li>This page will open the item in your <i>Steam</i> client.</li>
-				<li>If <i>Steam</i> is closed, it will redirect to the Workshop page in ${step6}.</li>
+				<li>If <i>Steam</i> is closed, it will redirect to the Workshop page in <b>10 seconds</b>.</li>
 			</ol>`;
 }
 
@@ -958,10 +953,10 @@ function generateWorkshopHTML(data) {
 				<a href="steam://url/CommunityFilePage/${workshopId}" id="open-steam" class="nav-button">Open in Steam</a>
 				<a href="${workshopUrl}" class="nav-button">Open in Browser</a>
 			</div>
-			<p class="fast-hint" id="redirect-paused" hidden>Redirect paused, so it can't interrupt Steam's prompt.</p>
+			<p class="redirect-status" id="redirect-status">${fast ? 'Opening the Workshop page...' : `Opening the Workshop page in <b id="countdown">${refreshDelay}</b>...`}</p>
 		</div>
 		<div class="instructions">
-			${renderInstructions(refreshDelay)}
+			${renderInstructions()}
 		</div>
 	`)}
 	</main>
