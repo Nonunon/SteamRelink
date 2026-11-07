@@ -3,3 +3,13 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=31536000
+
+# only files we host and rarely change. styles.css and js/ stay on the default
+# revalidation so a deploy shows up right away. None of this touches embeds,
+# which use Steam's own image URLs, or Steam API calls, which are in the worker
+/fonts/*
+  Cache-Control: public, max-age=2592000
+/vendor/*
+  Cache-Control: public, max-age=2592000
+/images/*
+  Cache-Control: public, max-age=604800
