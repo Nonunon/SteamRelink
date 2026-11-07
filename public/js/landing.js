@@ -54,6 +54,11 @@ function runConvert() {
 }
 
 convertBtn.addEventListener('click', runConvert);
+// flipping the toggle after converting rebuilds the link, rather than leaving the
+// old one sitting there. The ID can always be read back out of the converted URL
+fastToggle.addEventListener('change', () => {
+	if (!converterCopyBtn.hidden && extractWorkshopId(converterInput.value)) runConvert();
+});
 converterInput.addEventListener('keydown', (e) => {
 	if (e.key === 'Enter') runConvert();
 });
