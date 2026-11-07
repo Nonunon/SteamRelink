@@ -162,11 +162,19 @@
 
 	const setArrow = th => {
 		document.querySelectorAll('.stats-table thead th[data-sort] .sort-arrow').forEach(el => el.remove());
-		if (!th) return;
+		document.querySelectorAll('.stats-table thead th[aria-sort]').forEach(el => el.removeAttribute('aria-sort'));
+		if (!th) {
+			// back to the default order, which is what the rank header announces on load
+			document.querySelector('.stats-table thead th[data-sort="rank"]').setAttribute('aria-sort', 'ascending');
+			return;
+		}
+		const ascending = th.dataset.currentDirection === 'asc';
+		th.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
 		const arrow = document.createElement('span');
 		arrow.className = 'sort-arrow';
-		arrow.textContent = th.dataset.currentDirection === 'asc' ? ' ▲' : ' ▼';
-		th.appendChild(arrow);
+		arrow.setAttribute('aria-hidden', 'true');
+		arrow.textContent = ascending ? ' ▲' : ' ▼';
+		th.querySelector('button').appendChild(arrow);
 	};
 
 	// 3-click cycle: default direction, opposite, then back to rank

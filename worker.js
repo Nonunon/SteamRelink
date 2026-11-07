@@ -109,10 +109,10 @@ function renderFooter() {
 // wraps content in the .rectangle card, with the title floated on top of it
 function renderCard(innerHtml, extraClass = "") {
 	return `<div class="card">
+		<h1 class="card-heading"><a href="/" class="title" id="title">SteamRelink</a></h1>
 		<div class="rectangle${extraClass ? ' ' + extraClass : ''}">
 			${innerHtml}
 		</div>
-		<a href="/" class="title" id="title">SteamRelink</a>
 	</div>`;
 }
 
@@ -716,9 +716,9 @@ async function handleStats(request, env, ctx) {
 	<script src="/vendor/simplebar.min.js" defer></script>
 </head>
 <body class="stats-body">
-	<div class="stats-container">
+	<main class="stats-container">
 		<div class="stats-header">
-			<a href="/" class="title">SteamRelink Statistics</a>
+			<h1 class="stats-heading"><a href="/" class="title">SteamRelink Statistics</a></h1>
 		</div>
 
 		<div class="stats-summary">
@@ -754,12 +754,13 @@ async function handleStats(request, env, ctx) {
 		<p id="stats-status" class="stats-status" role="status"></p>
 		<div class="table-wrapper">
 		<table class="stats-table">
+			<caption class="visually-hidden">Workshop items by view count</caption>
 			<thead>
 				<tr>
-					<th class="col-rank" data-sort="rank">Rank</th>
-					<th data-sort="title">Workshop Item</th>
-					<th class="col-views" data-sort="views">Views</th>
-					<th class="col-lastviewed" data-sort="lastviewed">Last Viewed</th>
+					<th scope="col" class="col-rank" data-sort="rank" aria-sort="ascending"><button type="button" class="sort-button">Rank</button></th>
+					<th scope="col" data-sort="title"><button type="button" class="sort-button">Workshop Item</button></th>
+					<th scope="col" class="col-views" data-sort="views"><button type="button" class="sort-button">Views</button></th>
+					<th scope="col" class="col-lastviewed" data-sort="lastviewed"><button type="button" class="sort-button">Last Viewed</button></th>
 				</tr>
 			</thead>
 			<tbody>
@@ -787,7 +788,7 @@ async function handleStats(request, env, ctx) {
 		<div class="back-link">
 			<a href="/" class="nav-button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>Back to SteamRelink</a>
 		</div>
-	</div>
+	</main>
 
 	${renderFooter()}
 	<script src="/js/stats.js" defer></script>
@@ -823,6 +824,7 @@ function generateLandingPage(origin) {
 </head>
 <body>
 	<a href="/stats" class="nav-button stats-corner-link"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>Stats</a>
+	<main class="page-main">
 	${renderCard(`
 		${renderIntro()}
 		<div class="instructions">
@@ -844,7 +846,7 @@ function generateLandingPage(origin) {
 		</div>
 	`)}
 	<div class="rectangle converter-box">
-		<div class="converter-label">Convert a Workshop link</div>
+		<label class="converter-label" for="converter-input">Convert a Workshop link</label>
 		<div class="converter-input-row">
 			<input type="text" id="converter-input" class="converter-input" placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=EXAMPLE" autocomplete="off">
 			<button class="copy-btn" id="converter-copy-btn" aria-label="Copy converted URL" hidden><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
@@ -857,8 +859,9 @@ function generateLandingPage(origin) {
 			</label>
 			<button type="button" id="convert-btn" class="nav-button">Convert</button>
 		</div>
-		<div id="converter-error" class="converter-error" hidden></div>
+		<div id="converter-error" class="converter-error" role="alert" hidden></div>
 	</div>
+	</main>
 	${renderFooter()}
 	<script src="/js/landing.js" defer></script>
 </body>
@@ -878,6 +881,7 @@ function generateErrorPage(heading, messageHtml, workshopId = null) {
 	${renderHead(`SteamRelink - ${heading}`, '<meta name="robots" content="noindex">')}
 </head>
 <body>
+	<main class="page-main">
 	${renderCard(`
 		<div class="text">
 			${messageHtml}
@@ -887,6 +891,7 @@ function generateErrorPage(heading, messageHtml, workshopId = null) {
 			<a href="/" class="nav-button">Back to SteamRelink</a>
 		</div>
 	`)}
+	</main>
 	${renderFooter()}
 </body>
 </html>`;
@@ -942,6 +947,7 @@ function generateWorkshopHTML(data) {
 	${renderHead(`SteamRelink::${safeTitle}`, extraHead)}
 </head>
 <body data-workshop-id="${workshopId}" data-fast="${fast ? 1 : 0}" data-delay="${refreshDelay}">
+	<main class="page-main">
 	${renderCard(`
 		${renderIntro()}
 		<div class="link-section" id="link-section">
@@ -958,6 +964,7 @@ function generateWorkshopHTML(data) {
 			${renderInstructions(refreshDelay)}
 		</div>
 	`)}
+	</main>
 	${renderFooter()}
 	<script src="/js/workshop.js" defer></script>
 </body>

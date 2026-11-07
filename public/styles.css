@@ -88,6 +88,39 @@ body {
     max-width: calc(100vw - 40px);
 }
 
+/* holds the page's <h1> without changing how .title looks or floats */
+.card-heading,
+.stats-heading {
+    margin: 0;
+    font: inherit;
+}
+
+/* same centered column body gives the cards, one level down */
+.page-main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* keyboard focus ring everywhere; a few controls swap it for a border below */
+a:focus-visible,
+button:focus-visible {
+    outline: 2px solid #66c0f4;
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
 .title {
     display: block; /* <a> is inline by default; text-align:center needs block */
     font-family: 'RimWordFont', sans-serif;
@@ -288,6 +321,7 @@ body {
 
 /* link-converter widget, landing page only */
 .converter-label {
+    display: block;
     font-family: 'Roboto', sans-serif;
     font-size: 15px;
     font-weight: bold;
@@ -569,6 +603,16 @@ body.stats-body {
 
 /* no hover treatment or icon until sorted, stays a "click around and find it" affordance */
 .stats-table thead th[data-sort] {
+    cursor: pointer;
+}
+
+/* real buttons so sorting works from the keyboard; look identical to plain header text */
+.sort-button {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
     cursor: pointer;
 }
 
@@ -955,5 +999,19 @@ body.stats-body {
 
     .last-viewed {
         font-size: 0.95em; /* relative to the already-reduced cell font-size above */
+    }
+}
+
+/* keeps everything working, just without the movement */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+
+    .rectangle:hover,
+    .nav-button:hover,
+    #countdown.tick {
+        transform: none;
     }
 }
