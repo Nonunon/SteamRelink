@@ -15,8 +15,9 @@ To deploy your own copy, copy [`wrangler.toml.example`](wrangler.toml.example) t
 - **Optimized for Discord**: Tailored for cleaner link handling in Discord channels.
 - **Lightweight & Simple**: Minimal and easy to use.
 - **Supports Unlisted Workshop Files**: Allows sharing of unlisted Steam Workshop files, as long as they are not private or restricted to friends-only visibility. Unlisted items are never shown on the public stats page.
+- **Manual Fallback**: Item pages have **Open in Steam** and **Open in Browser** buttons, in case the Steam prompt gets dismissed or blocked. Using Open in Steam pauses the redirect so it can't interrupt the prompt.
 - **Link Converter**: Paste a full Steam Workshop URL, or just the numeric ID, into the built-in converter on the homepage and get a ready-to-share SteamRelink link, copied to your clipboard automatically.
-- **Usage Stats**: Visit [/stats](https://steamre.link/stats) to see total views, per-item view counts, and which game each linked item belongs to, with a filter to narrow the list down to one game. Only human views count: a view is logged when a real browser opens the page, so Discord's link previews, crawlers and bots don't move the numbers, and coming back to the same link within a short while counts once.
+- **Usage Stats**: Visit [/stats](https://steamre.link/stats) to see total views, per-item view counts, and which game each linked item belongs to, with a game filter and search that update the totals and can be shared as a link (like `/stats?game=RimWorld`). A view is logged when a browser actually opens the page, so Discord's link previews and known crawlers don't count, and coming back to the same link within a short while counts once. Counting is best-effort, so a determined script could still get through.
 
 ## How to Use
 
