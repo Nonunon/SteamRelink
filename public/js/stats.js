@@ -196,6 +196,65 @@
 	});
 })();
 
+// one shared tooltip for [data-tip], in place of native title tooltips, which
+// ignore the page's styling and never show on touch screens
+(() => {
+	const tip = document.createElement('div');
+	tip.className = 'tooltip';
+	tip.setAttribute('role', 'tooltip');
+	tip.hidden = true;
+	document.body.appendChild(tip);
+
+	let anchor = null;
+
+	const show = (el) => {
+		// titles only need it when they're actually cut off
+		if (el.classList.contains('item-title') && el.scrollWidth <= el.clientWidth) return;
+		anchor = el;
+		tip.textContent = el.dataset.tip;
+		tip.hidden = false;
+
+		const target = el.getBoundingClientRect();
+		const size = tip.getBoundingClientRect();
+		const left = Math.max(8, Math.min(target.left + target.width / 2 - size.width / 2, window.innerWidth - size.width - 8));
+		const above = target.top - size.height - 6;
+		tip.style.left = `${left}px`;
+		tip.style.top = `${above >= 8 ? above : target.bottom + 6}px`;
+	};
+
+	const hide = () => {
+		anchor = null;
+		tip.hidden = true;
+	};
+
+	const tipTarget = (e) => e.target.closest?.('[data-tip]');
+
+	document.addEventListener('pointerover', (e) => {
+		if (e.pointerType !== 'mouse') return;
+		const el = tipTarget(e);
+		if (el) show(el);
+		else if (anchor && document.activeElement !== anchor) hide();
+	});
+	document.addEventListener('focusin', (e) => {
+		const el = tipTarget(e);
+		if (el) show(el);
+	});
+	document.addEventListener('focusout', hide);
+	// iOS doesn't focus buttons on tap, so taps go through click
+	document.addEventListener('click', (e) => {
+		const el = tipTarget(e);
+		if (el?.matches('button')) show(el);
+	});
+	document.addEventListener('pointerdown', (e) => {
+		if (anchor && !anchor.contains(e.target)) hide();
+	});
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape') hide();
+	});
+	// capture, since the table scrolls inside SimpleBar and scroll doesn't bubble
+	document.addEventListener('scroll', hide, true);
+})();
+
 // formatted here, not server-side, so it reflects the viewer's own timezone
 document.querySelectorAll('.last-viewed[data-iso]').forEach(cell => {
 	const iso = cell.dataset.iso;

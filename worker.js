@@ -766,16 +766,16 @@ async function handleStats(request, env, ctx) {
 				${allStats.map((item, index) => `
 				<tr data-game="${escapeHtml(item.gameName || '')}" data-rank="${index + 1}" data-title="${escapeHtml(item.title)}" data-views="${item.count}">
 					<td class="rank col-rank">#${index + 1}</td>
-					<td class="item-cell"><a href="${item.url}" target="_blank" class="item-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</a></td>
+					<td class="item-cell"><a href="${item.url}" target="_blank" class="item-title" data-tip="${escapeHtml(item.title)}">${escapeHtml(item.title)}</a></td>
 					<td class="col-views">${item.count}</td>
 					<td class="last-viewed col-lastviewed" data-iso="${escapeHtml(item.lastViewed)}">${formatLastViewedFallback(item.lastViewed)}</td>
 				</tr>
 				`).join('')}
 				${excludedStats.map(item => `
 				<tr class="excluded-row" data-excluded="true" data-game="${escapeHtml(item.gameName || '')}" data-title="${escapeHtml(item.title)}">
-					<td class="rank col-rank"><span class="excluded-mark" title="${escapeHtml(item.reason)}">#??</span></td>
-					<td class="item-cell"><a href="${item.url}" target="_blank" class="item-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</a></td>
-					<td class="col-views"><span class="excluded-mark" title="${escapeHtml(item.reason)}">??</span></td>
+					<td class="rank col-rank"><button type="button" class="excluded-mark" data-tip="${escapeHtml(item.reason)}" aria-label="${escapeHtml(item.reason)}">#??</button></td>
+					<td class="item-cell"><a href="${item.url}" target="_blank" class="item-title" data-tip="${escapeHtml(item.title)}">${escapeHtml(item.title)}</a></td>
+					<td class="col-views"><button type="button" class="excluded-mark" data-tip="${escapeHtml(item.reason)}" aria-label="${escapeHtml(item.reason)}">??</button></td>
 					<td class="last-viewed col-lastviewed" data-iso="${escapeHtml(item.lastViewed || '')}">${formatLastViewedFallback(item.lastViewed)}</td>
 				</tr>
 				`).join('')}
@@ -830,12 +830,12 @@ function generateLandingPage(origin) {
 			<p style="margin-top: 20px;"><b>Example:</b></p>
 			<div class="code-row">
 				<code>${origin}/?id=1923990111</code>
-				<button class="copy-btn" data-copy="${origin}/?id=1923990111" title="Copy" aria-label="Copy example URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+				<button class="copy-btn" data-copy="${origin}/?id=1923990111" aria-label="Copy example URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
 			</div>
 			<p style="margin-top: 20px;"><b>Fast mode</b> (skips the 10-second wait):</p>
 			<div class="code-row">
 				<code>${origin}/?id=1923990111&fast</code>
-				<button class="copy-btn" data-copy="${origin}/?id=1923990111&fast" title="Copy" aria-label="Copy fast mode URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+				<button class="copy-btn" data-copy="${origin}/?id=1923990111&fast" aria-label="Copy fast mode URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
 			</div>
 			<p class="fast-hint">Fast mode fires the Steam launch immediately, no countdown. The <a href="https://github.com/Nonunon/SteamRelink" target="_blank">SteamRelink userscript</a> can also auto-close the tab afterward.</p>
 			<p style="margin-top: 20px;"><b>Not sure your browser will let this through?</b></p>
@@ -847,7 +847,7 @@ function generateLandingPage(origin) {
 		<div class="converter-label">Convert a Workshop link</div>
 		<div class="converter-input-row">
 			<input type="text" id="converter-input" class="converter-input" placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=EXAMPLE" autocomplete="off">
-			<button class="copy-btn" id="converter-copy-btn" title="Copy" aria-label="Copy converted URL" hidden><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+			<button class="copy-btn" id="converter-copy-btn" aria-label="Copy converted URL" hidden><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
 		</div>
 		<div class="converter-options">
 			<label class="fast-toggle">
