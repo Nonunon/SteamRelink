@@ -15,9 +15,12 @@ const VIEW_DEDUPE_SECONDS = 1800;
 const STEAM_API_TIMEOUT_MS = 5000;
 const IMAGE_PROBE_TIMEOUT_MS = 2000;
 
-// inline styles stay allowed (a few elements still use style=""), scripts are same-origin only
+// inline styles stay allowed (a few elements still use style=""). Scripts are
+// same-origin plus Cloudflare's Web Analytics beacon, which the edge injects
+// into pages and which reports to /cdn-cgi/rum here, so connect-src stays 'self'.
+// Host only, because the beacon's URL has a version segment after beacon.min.js
 const SECURITY_HEADERS = {
-	"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	"Content-Security-Policy": "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 	"X-Content-Type-Options": "nosniff",
 	"Referrer-Policy": "strict-origin-when-cross-origin",
 	"Permissions-Policy": "camera=(), microphone=(), geolocation=(), browsing-topics=()",
