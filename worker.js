@@ -723,15 +723,15 @@ async function handleStats(request, env, ctx) {
 
 		<div class="stats-summary">
 			<div class="stat-card">
-				<div class="stat-number">${totalViews.toLocaleString()}</div>
+				<div class="stat-number" data-stat="views">${totalViews.toLocaleString()}</div>
 				<div class="stat-label">Total Views</div>
 			</div>
 			<div class="stat-card">
-				<div class="stat-number">${totalItems.toLocaleString()}</div>
+				<div class="stat-number" data-stat="items">${totalItems.toLocaleString()}</div>
 				<div class="stat-label">Unique Items</div>
 			</div>
 			<div class="stat-card">
-				<div class="stat-number">${totalItems > 0 ? Math.round(totalViews / totalItems) : 0}</div>
+				<div class="stat-number" data-stat="avg">${totalItems > 0 ? Math.round(totalViews / totalItems) : 0}</div>
 				<div class="stat-label">Avg Views per Item</div>
 			</div>
 		</div>
@@ -749,7 +749,9 @@ async function handleStats(request, env, ctx) {
 					${uniqueGames.map(g => `<li role="option" tabindex="-1" data-value="${escapeHtml(g)}" aria-selected="false">${escapeHtml(g)}</li>`).join('')}
 				</ul>
 			</div>
+			<input type="text" id="stats-search" class="stats-search" placeholder="Search items" aria-label="Search items" autocomplete="off" spellcheck="false">
 		</div>
+		<p id="stats-status" class="stats-status" role="status"></p>
 		<div class="table-wrapper">
 		<table class="stats-table">
 			<thead>

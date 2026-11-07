@@ -21,15 +21,71 @@
 		if (refocus) button.focus();
 	};
 
-	const choose = (option) => {
+	const search = document.getElementById('stats-search');
+	const status = document.getElementById('stats-status');
+	const cards = {
+		views: document.querySelector('[data-stat="views"]'),
+		items: document.querySelector('[data-stat="items"]'),
+		avg: document.querySelector('[data-stat="avg"]')
+	};
+
+	// game and search stack; the cards follow whatever's left showing, minus
+	// excluded rows, which never count toward the totals
+	const applyFilters = () => {
+		const game = selectedOption().dataset.value;
+		const query = search.value.trim().toLowerCase();
+		let views = 0;
+		let items = 0;
+		let shown = 0;
+
+		document.querySelectorAll('.stats-table tbody tr').forEach(row => {
+			const visible = (game === 'all' || row.dataset.game === game)
+				&& (!query || (row.dataset.title || '').toLowerCase().includes(query));
+			row.style.display = visible ? '' : 'none';
+			if (!visible) return;
+			shown++;
+			if (row.dataset.excluded !== 'true') {
+				items++;
+				views += Number(row.dataset.views);
+			}
+		});
+
+		cards.views.textContent = views.toLocaleString();
+		cards.items.textContent = items.toLocaleString();
+		cards.avg.textContent = items > 0 ? Math.round(views / items) : 0;
+
+		// a visible message when nothing matches, otherwise just read out by screen readers
+		status.textContent = shown > 0 ? `${shown} ${shown === 1 ? 'item' : 'items'} shown` : 'No items match that.';
+		status.classList.toggle('stats-status-empty', shown === 0);
+
+		// keeps the view shareable, e.g. /stats?game=RimWorld
+		const params = new URLSearchParams();
+		if (game !== 'all') params.set('game', game);
+		if (query) params.set('q', search.value.trim());
+		const queryString = params.toString();
+		history.replaceState(null, '', location.pathname + (queryString ? `?${queryString}` : ''));
+	};
+
+	const select = (option) => {
 		options.forEach(o => o.setAttribute('aria-selected', o === option ? 'true' : 'false'));
 		label.textContent = option.textContent;
-		const selected = option.dataset.value;
-		document.querySelectorAll('.stats-table tbody tr').forEach(row => {
-			row.style.display = (selected === 'all' || row.dataset.game === selected) ? '' : 'none';
-		});
+	};
+
+	const choose = (option) => {
+		select(option);
+		applyFilters();
 		close(true);
 	};
+
+	search.addEventListener('input', applyFilters);
+
+	// restore a shared view. Only touches the page when the URL asks for
+	// something, so a plain /stats keeps the server-rendered numbers as they are
+	const params = new URLSearchParams(location.search);
+	const sharedGame = options.find(o => o.dataset.value === params.get('game'));
+	if (sharedGame) select(sharedGame);
+	if (params.get('q')) search.value = params.get('q');
+	if (sharedGame || params.get('q')) applyFilters();
 
 	button.addEventListener('click', () => (isOpen() ? close(false) : open()));
 	button.addEventListener('keydown', (e) => {
