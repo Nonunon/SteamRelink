@@ -550,6 +550,21 @@ async function countView(workshopId, request, url, env) {
 	const dedupeKey = new Request(`${url.origin}/__viewed/${workshopId}/${ipHash}`);
 
 	if (await caches.default.match(dedupeKey)) return;
+
+	// caps how fast one IP can spend KV writes by walking the public IDs on
+	// /stats. After the dedupe check so repeat beacons don't use up the budget,
+	// and its own key so views and lookups don't share one. Same loose limiter
+	// as lookups: it stops one scraper, not one rotating through many IPs
+	if (env.LOOKUP_LIMITER) {
+		try {
+			const { success } = await env.LOOKUP_LIMITER.limit({ key: `view:${ip}` });
+			if (!success) return;
+		} catch (error) {
+			// fail open: a limiter hiccup shouldn't lose real views
+			console.error("View rate limit check error:", error);
+		}
+	}
+
 	// marked before the KV work so concurrent beacons from one IP count once
 	await caches.default.put(dedupeKey, new Response(null, { headers: { "Cache-Control": `max-age=${VIEW_DEDUPE_SECONDS}` } }));
 
