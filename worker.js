@@ -283,7 +283,7 @@ export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 
-		if (url.pathname === '/stats') {
+		if (url.pathname === '/stats' || url.pathname === '/stats/') {
 			return handleStats(request, env, ctx);
 		}
 
