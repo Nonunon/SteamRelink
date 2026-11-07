@@ -127,6 +127,8 @@ The script also auto-closes fast-mode SteamRelink tabs shortly after Steam picks
 
 The `/stats` page's scrollbar uses [SimpleBar](https://github.com/Grsmto/simplebar) (MIT License), vendored locally under [`public/vendor/`](public/vendor/) rather than pulled from a CDN.
 
+Body text uses [Roboto](https://fonts.google.com/specimen/Roboto) (Apache License 2.0), self-hosted under [`public/fonts/`](public/fonts/).
+
 ## License
 
 This project is licensed under the GPL-3.0 License.
