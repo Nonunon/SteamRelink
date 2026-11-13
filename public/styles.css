@@ -331,6 +331,90 @@ button:focus-visible {
     color: #66c0f4;
 }
 
+/* &fast "Open Steam?" overlay, added by workshop.js while the page waits on
+   the browser's prompt. The arrow points up at where browsers draw it */
+.steam-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 72px 16px 32px;
+    box-sizing: border-box;
+    background: rgba(12, 18, 26, 0.82);
+    backdrop-filter: blur(4px);
+    animation: steam-overlay-in 0.2s ease-out;
+}
+
+@keyframes steam-overlay-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.steam-overlay-arrow {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    margin-left: -20px;
+    color: #66c0f4;
+    filter: drop-shadow(0 0 8px rgba(102, 192, 244, 0.6));
+    animation: steam-overlay-nudge 1.2s ease-in-out infinite;
+}
+
+@keyframes steam-overlay-nudge {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+.steam-overlay-card {
+    width: 460px;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 28px 24px 22px;
+    background-color: #2a2a2a;
+    border: 2px solid #66c0f4;
+    border-radius: 8px;
+    box-shadow: 0 0 0 4px rgba(102, 192, 244, 0.15), 0 12px 32px rgba(0, 0, 0, 0.7);
+    text-align: center;
+    color: #c7d5e0;
+    font-family: 'Roboto', sans-serif;
+    animation: card-in 0.3s ease-out;
+}
+
+.steam-overlay-title {
+    margin: 0 0 12px;
+    font-size: 24px;
+    line-height: 1.25;
+    color: #ffffff;
+}
+
+.steam-overlay-body {
+    margin: 0 0 18px;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+.steam-overlay-body b {
+    color: #66c0f4;
+}
+
+.steam-overlay-card .item-actions {
+    justify-content: center;
+}
+
+@media (max-width: 480px) {
+    .steam-overlay-title {
+        font-size: 20px;
+    }
+
+    .steam-overlay-body {
+        font-size: 15px;
+    }
+}
+
 /* numbered step badges */
 .instructions .steps {
     list-style: none;

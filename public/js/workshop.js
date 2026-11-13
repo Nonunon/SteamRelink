@@ -39,12 +39,68 @@ const status = document.getElementById('redirect-status');
 if (firstFast) {
 	// the worker rendered the fast-mode line, which has no countdown
 	status.innerHTML = `Opening the Workshop page in <b id="countdown">${delay}</b>...`;
-	const hint = document.createElement('p');
-	hint.className = 'fast-hint first-visit-hint';
-	hint.textContent = 'First time here? If your browser asks to open Steam, tick "Always allow" and fast links will open instantly from now on.';
-	status.after(hint);
 }
 const countdownElement = document.getElementById('countdown');
+
+// &fast only: a loud overlay for visitors who are likely looking at the
+// browser's "Open Steam?" prompt. "first" and "unfocused" can't be sure a
+// prompt is up (steam:// may have no handler, or be allowed already), so they
+// say "if"; "prompt" is a first-timer whose page just blurred, so something
+// did take focus. The fixed copy below is trusted, hence innerHTML
+const OVERLAY_COPY = {
+	first: {
+		title: 'Opening in Steam',
+		body: 'If your browser asks to open Steam, tick <b>Always allow</b> and click <b>Open</b>. Fast links open instantly from then on.'
+	},
+	prompt: {
+		title: 'Your browser is asking to open Steam',
+		body: 'Tick <b>Always allow</b>, then click <b>Open</b>. Fast links open instantly from then on.'
+	},
+	unfocused: {
+		title: 'Waiting for Steam',
+		body: 'If your browser asks to open Steam, click <b>Open</b>. The Workshop page opens here once that\'s done.'
+	}
+};
+
+let overlay = null;
+let statusHome = null;
+
+function showOverlay(mode) {
+	if (stopped) return;
+	if (!overlay) {
+		overlay = document.createElement('div');
+		overlay.className = 'steam-overlay';
+		overlay.setAttribute('role', 'dialog');
+		overlay.setAttribute('aria-modal', 'true');
+		overlay.setAttribute('aria-labelledby', 'steam-overlay-title');
+		overlay.innerHTML = `
+			<svg class="steam-overlay-arrow" aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path></svg>
+			<div class="steam-overlay-card">
+				<h2 class="steam-overlay-title" id="steam-overlay-title" aria-live="polite"></h2>
+				<p class="steam-overlay-body"></p>
+				<div class="item-actions">
+					<a href="${steamClientUrl}" class="nav-button steam-overlay-open">Open in Steam</a>
+					<a href="${workshopUrl}" class="nav-button">Open in Browser</a>
+				</div>
+			</div>`;
+		// the real status line moves in, so the countdown and "Waiting for
+		// Steam..." stay one live element instead of a copy that drifts
+		statusHome = document.createComment('redirect-status');
+		status.replaceWith(statusHome);
+		overlay.querySelector('.steam-overlay-card').appendChild(status);
+		overlay.querySelector('.steam-overlay-open').addEventListener('click', stopRedirect);
+		document.body.appendChild(overlay);
+	}
+	overlay.querySelector('.steam-overlay-title').textContent = OVERLAY_COPY[mode].title;
+	overlay.querySelector('.steam-overlay-body').innerHTML = OVERLAY_COPY[mode].body;
+}
+
+function hideOverlay() {
+	if (!overlay) return;
+	statusHome.replaceWith(status);
+	overlay.remove();
+	overlay = null;
+}
 
 let steamFired = false;
 let stopped = false;
@@ -52,6 +108,8 @@ let held = false;
 let fallbackTimer = null;
 let countdownInterval = null;
 let countdown = delay;
+
+if (firstFast) showOverlay('first');
 
 // replace, not href: this page must not stay in history, or pressing Back on
 // the Workshop page reloads it, which fires steam:// and bounces forward again
@@ -91,7 +149,7 @@ const steamTimer = setTimeout(() => {
 	// a tab that opened without focus (browser behind another window) never
 	// blurs, so the prompt would get no hold. Hold from the start instead and
 	// let the first focus release it, same as coming back from the prompt
-	if (fastRequested && !document.hasFocus()) hold();
+	if (fastRequested && !document.hasFocus()) hold('unfocused');
 }, fastRequested ? 0 : 1000);
 
 scheduleFallback(fast ? FAST_FALLBACK_MS : delay * 1000);
@@ -103,15 +161,19 @@ startCountdown();
 // answered yet, so hold the fallback until focus comes back. If steam:// has
 // no handler at all, nothing blurs and the fallback runs as usual, which is
 // the right outcome for that visitor
-function hold() {
+function hold(reason) {
 	if (!fastRequested || !steamFired || stopped || held) return;
 	held = true;
 	clearTimeout(fallbackTimer);
 	clearInterval(countdownInterval);
 	status.textContent = 'Waiting for Steam...';
+	// a returning visitor's page blurring is usually Steam itself opening,
+	// so only first-timers and unfocused tabs get the overlay
+	if (reason === 'unfocused') showOverlay(firstFast ? 'first' : 'unfocused');
+	else if (firstFast) showOverlay('prompt');
 }
 
-window.addEventListener('blur', hold);
+window.addEventListener('blur', () => hold('blur'));
 
 // back from the prompt (Open or Cancel) or from Steam: the prompt is settled,
 // so the rest of the countdown has nothing left to protect
@@ -124,11 +186,14 @@ window.addEventListener('focus', () => {
 
 // the link itself fires steam://, this just gets the timers out of its way: the
 // fallback landing mid-prompt would cancel it, which is why it was clicked
-document.getElementById('open-steam').addEventListener('click', () => {
+function stopRedirect() {
 	stopped = true;
 	clearTimeout(steamTimer);
 	clearTimeout(fallbackTimer);
 	clearInterval(countdownInterval);
+	hideOverlay();
 	status.textContent = 'Redirect paused';
 	status.classList.add('paused');
-});
+}
+
+document.getElementById('open-steam').addEventListener('click', stopRedirect);
