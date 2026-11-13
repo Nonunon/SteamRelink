@@ -78,17 +78,14 @@ function showOverlay(mode) {
 			<div class="steam-overlay-card">
 				<h2 class="steam-overlay-title" id="steam-overlay-title" aria-live="polite"></h2>
 				<p class="steam-overlay-body"></p>
-				<div class="item-actions">
-					<a href="${steamClientUrl}" class="nav-button steam-overlay-open">Open in Steam</a>
-					<a href="${workshopUrl}" class="nav-button">Open in Browser</a>
-				</div>
 			</div>`;
+		// no buttons in here: Firefox's prompt is tab-modal and blocks the page
+		// under it, and once it's answered the page leaves within 300ms anyway
 		// the real status line moves in, so the countdown and "Waiting for
 		// Steam..." stay one live element instead of a copy that drifts
 		statusHome = document.createComment('redirect-status');
 		status.replaceWith(statusHome);
 		overlay.querySelector('.steam-overlay-card').appendChild(status);
-		overlay.querySelector('.steam-overlay-open').addEventListener('click', stopRedirect);
 		document.body.appendChild(overlay);
 	}
 	overlay.querySelector('.steam-overlay-title').textContent = OVERLAY_COPY[mode].title;
