@@ -88,6 +88,10 @@ function startCountdown() {
 const steamTimer = setTimeout(() => {
 	steamFired = true;
 	window.location.href = steamClientUrl;
+	// a tab that opened without focus (browser behind another window) never
+	// blurs, so the prompt would get no hold. Hold from the start instead and
+	// let the first focus release it, same as coming back from the prompt
+	if (fastRequested && !document.hasFocus()) hold();
 }, fastRequested ? 0 : 1000);
 
 scheduleFallback(fast ? FAST_FALLBACK_MS : delay * 1000);
@@ -99,13 +103,15 @@ startCountdown();
 // answered yet, so hold the fallback until focus comes back. If steam:// has
 // no handler at all, nothing blurs and the fallback runs as usual, which is
 // the right outcome for that visitor
-window.addEventListener('blur', () => {
+function hold() {
 	if (!fastRequested || !steamFired || stopped || held) return;
 	held = true;
 	clearTimeout(fallbackTimer);
 	clearInterval(countdownInterval);
 	status.textContent = 'Waiting for Steam...';
-});
+}
+
+window.addEventListener('blur', hold);
 
 // back from the prompt (Open or Cancel) or from Steam: the prompt is settled,
 // so the rest of the countdown has nothing left to protect
