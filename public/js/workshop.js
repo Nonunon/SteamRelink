@@ -1,6 +1,23 @@
 const id = document.body.dataset.workshopId;
-const fast = document.body.dataset.fast === '1';
-const delay = Number(document.body.dataset.delay);
+const fastRequested = document.body.dataset.fast === '1';
+
+// &fast links get shared publicly, so whoever opens one may never have seen
+// the "Open Steam?" prompt. A browser's first SteamRelink visit ignores &fast
+// for the redirect (the countdown gives the prompt room); every later visit
+// honors it. Storage that throws counts as seen, so blocked site data doesn't
+// mean slow mode forever
+const SEEN_KEY = 'sr-seen';
+let seen = true;
+try {
+	seen = localStorage.getItem(SEEN_KEY) === '1';
+	localStorage.setItem(SEEN_KEY, '1');
+} catch {}
+const fast = fastRequested && seen;
+// first visit on a fast link: steam:// still fires right away, since the
+// userscript closes fast tabs at ~150ms and would beat a 1s delay
+const firstFast = fastRequested && !seen;
+// matches the worker's normal-mode refreshDelay
+const delay = firstFast ? 10 : Number(document.body.dataset.delay);
 
 // first thing, before any timer: the userscript closes fast-mode tabs after
 // ~150ms. webdriver check skips automated browsers (they can't be told apart
@@ -19,12 +36,21 @@ const FAST_FALLBACK_MS = 1500;
 const REFOCUS_GRACE_MS = 300;
 
 const status = document.getElementById('redirect-status');
+if (firstFast) {
+	// the worker rendered the fast-mode line, which has no countdown
+	status.innerHTML = `Opening the Workshop page in <b id="countdown">${delay}</b>...`;
+	const hint = document.createElement('p');
+	hint.className = 'fast-hint first-visit-hint';
+	hint.textContent = 'First time here? If your browser asks to open Steam, tick "Always allow" and fast links will open instantly from now on.';
+	status.after(hint);
+}
 const statusDefault = status.innerHTML;
 let countdownElement = document.getElementById('countdown');
 
 let steamFired = false;
 let stopped = false;
 let held = false;
+let heldRemaining = 0;
 let fallbackTimer = null;
 let fallbackDeadline = 0;
 let countdownInterval = null;
@@ -66,7 +92,7 @@ function startCountdown() {
 const steamTimer = setTimeout(() => {
 	steamFired = true;
 	window.location.href = steamClientUrl;
-}, fast ? 0 : 1000);
+}, fastRequested ? 0 : 1000);
 
 scheduleFallback(fast ? FAST_FALLBACK_MS : delay * 1000);
 startCountdown();
@@ -79,6 +105,8 @@ startCountdown();
 window.addEventListener('blur', () => {
 	if (!steamFired || stopped || held) return;
 	held = true;
+	// frozen, so time spent away doesn't eat the countdown
+	heldRemaining = fallbackDeadline - Date.now();
 	clearTimeout(fallbackTimer);
 	clearInterval(countdownInterval);
 	status.textContent = 'Waiting for Steam...';
@@ -87,7 +115,8 @@ window.addEventListener('blur', () => {
 window.addEventListener('focus', () => {
 	if (!held || stopped) return;
 	held = false;
-	const remaining = Math.max(fallbackDeadline - Date.now(), REFOCUS_GRACE_MS);
+	// fast mode only waited this long for a prompt to show up, and one did
+	const remaining = fast ? REFOCUS_GRACE_MS : Math.max(heldRemaining, REFOCUS_GRACE_MS);
 	status.innerHTML = statusDefault;
 	countdownElement = document.getElementById('countdown');
 	if (countdownElement) {
