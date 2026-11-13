@@ -44,15 +44,12 @@ if (firstFast) {
 	hint.textContent = 'First time here? If your browser asks to open Steam, tick "Always allow" and fast links will open instantly from now on.';
 	status.after(hint);
 }
-const statusDefault = status.innerHTML;
-let countdownElement = document.getElementById('countdown');
+const countdownElement = document.getElementById('countdown');
 
 let steamFired = false;
 let stopped = false;
 let held = false;
-let heldRemaining = 0;
 let fallbackTimer = null;
-let fallbackDeadline = 0;
 let countdownInterval = null;
 let countdown = delay;
 
@@ -60,7 +57,6 @@ let countdown = delay;
 // the Workshop page reloads it, which fires steam:// and bounces forward again
 function scheduleFallback(ms) {
 	clearTimeout(fallbackTimer);
-	fallbackDeadline = Date.now() + ms;
 	fallbackTimer = setTimeout(() => {
 		window.location.replace(workshopUrl);
 	}, ms);
@@ -97,34 +93,27 @@ const steamTimer = setTimeout(() => {
 scheduleFallback(fast ? FAST_FALLBACK_MS : delay * 1000);
 startCountdown();
 
-// no API says "the protocol prompt is open", but the prompt (or Steam taking
-// focus) blurs the page. Leaving while blurred would cancel a prompt the
-// visitor hasn't answered yet, so hold the fallback until focus comes back.
-// If steam:// has no handler at all, nothing blurs and the fallback runs as
-// normal, which is the right outcome for that visitor
+// &fast links only; normal links keep their plain countdown. No API says
+// "the protocol prompt is open", but the prompt (or Steam taking focus) blurs
+// the page. Leaving while blurred would cancel a prompt the visitor hasn't
+// answered yet, so hold the fallback until focus comes back. If steam:// has
+// no handler at all, nothing blurs and the fallback runs as usual, which is
+// the right outcome for that visitor
 window.addEventListener('blur', () => {
-	if (!steamFired || stopped || held) return;
+	if (!fastRequested || !steamFired || stopped || held) return;
 	held = true;
-	// frozen, so time spent away doesn't eat the countdown
-	heldRemaining = fallbackDeadline - Date.now();
 	clearTimeout(fallbackTimer);
 	clearInterval(countdownInterval);
 	status.textContent = 'Waiting for Steam...';
 });
 
+// back from the prompt (Open or Cancel) or from Steam: the prompt is settled,
+// so the rest of the countdown has nothing left to protect
 window.addEventListener('focus', () => {
 	if (!held || stopped) return;
 	held = false;
-	// fast mode only waited this long for a prompt to show up, and one did
-	const remaining = fast ? REFOCUS_GRACE_MS : Math.max(heldRemaining, REFOCUS_GRACE_MS);
-	status.innerHTML = statusDefault;
-	countdownElement = document.getElementById('countdown');
-	if (countdownElement) {
-		countdown = Math.max(1, Math.ceil(remaining / 1000));
-		countdownElement.textContent = countdown;
-		startCountdown();
-	}
-	scheduleFallback(remaining);
+	status.textContent = 'Opening the Workshop page...';
+	scheduleFallback(REFOCUS_GRACE_MS);
 });
 
 // the link itself fires steam://, this just gets the timers out of its way: the
